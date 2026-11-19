@@ -22,6 +22,15 @@ ws/
 │   ├── params.py            # Chốt Bảng §4.2, cỡ mẫu PAC theo E3, lưới vận tốc (T18)
 │   ├── runner.py            # Chạy M1/M2/M3 Phương án B có checkpoint & kiểm tra hoán đổi (T19–T20)
 │   └── report_carla.py      # Hình H12–H13 và báo cáo CARLA so với 2D (T21)
+├── num41/                  # Tái lập Mục 4.1 của bản thảo v0.1 trên dữ liệu tổng hợp (SPEC §10, T22–T27)
+│   ├── gen.py               # Bộ sinh mẫu (xe, tác nhân, sai số định vị/bám, nhóm GNSS, chế độ ρ)
+│   ├── scores.py            # Điểm số R/A/E, ngưỡng ĐX/B1/B3/B4, ngưỡng theo nhóm
+│   ├── run_n1.py            # N1 — Bảng 1, Hình 1
+│   ├── run_n2.py            # N2 — Hình 2 (theo σ_loc và ρ)
+│   ├── run_n3.py            # N3 — Bảng 2 (kèm độ nhạy U6B, U1W)
+│   ├── plot_samples.py      # Hình N0 kiểm tra trực quan bộ sinh
+│   ├── report_41.py         # Sinh báo cáo đối chiếu từ logs/num41/summary.json
+│   └── run_all.py           # Chạy toàn bộ: python -m num41.run_all --seed 2026
 ├── sim/
 │   ├── __init__.py
 │   ├── core.py              # Lõi mô phỏng 2D dùng chung (hỗ trợ S1–S10, D0–D10, Frenet đường cong, nhánh mở vòng E_track)
@@ -39,8 +48,9 @@ ws/
 │   └── README.md            # Hướng dẫn tóm tắt trong gói sim/
 ├── tests/                   # Bộ kiểm thử tự động TC-01..TC-18 (pytest)
 ├── logs/
-│   ├── old/                 # 5 file log Phương án A (v0.1)
-│   ├── new/                 # 6 file log Phương án B (v0.1)
+│   ├── A/                   # 5 file log Phương án A (v0.1)
+│   ├── B/                   # 6 file log Phương án B (v0.1)
+│   ├── num41/               # Log tái lập Mục 4.1 (CSV, summary.json, config.json, tests.txt)
 │   └── ext/                 # Toàn bộ log mở rộng v0.2 (OOD, RECAL, E1–E9, tests.txt)
 ├── figs/                    # 11 hình H1–H11 (PNG 300 dpi + PDF vector) và analysis*.json
 └── report/                  # Báo cáo v0.1 và báo cáo mở rộng v0.2 (.md và .docx)
@@ -60,7 +70,7 @@ Từ thư mục gốc `ws/`:
 python -m pytest
 ```
 
-2. Chạy lại mô phỏng v0.1 (`logs/old/`, `logs/new/`, `H1–H6`, báo cáo v0.1):
+2. Chạy lại mô phỏng v0.1 (`logs/A/`, `logs/B/`, `H1–H6`, báo cáo v0.1):
 ```bash
 python run_all.py --seed-base 0
 ```
@@ -100,3 +110,21 @@ Các tùy chọn bổ sung cho `run_all.py` và `run_ext.py`:
 | Đối chứng | B0–B6, ĐX-1/2/3 | Bổ sung `B3′` (phân tách có dấu $a + b$) |
 | Chu kỳ dự phòng | Gộp chung | Báo cáo riêng khả thi / dự phòng |
 | Quét $\alpha$ | Không | $\alpha \in \{0{,}01; 0{,}02; 0{,}05; 0{,}10; 0{,}20\}$ cho `B1`, `B3′`, `ĐX-2` |
+
+## 5. Tái lập Mục 4.1 (nghiên cứu số trên dữ liệu tổng hợp)
+
+Gói `num41/` độc lập với `sim/`, chỉ dùng chung hàm `sim.common.conformal_q`.
+
+```bash
+python -m num41.run_all --seed 2026
+```
+
+Lệnh trên (khoảng 1,5 phút) sinh:
+- log ở `logs/num41/`;
+- hình `figs/N0_samples`, `figs/N1_coverage`, `figs/N2_bounds` (`.png`, `.pdf`);
+- báo cáo đối chiếu với bản thảo `report/BAO_CAO_TAI_LAP_4_1.md` (và `.docx` nếu có pandoc);
+- kết quả `pytest tests/test_num41.py` ghi vào `logs/num41/tests.txt`.
+
+Chạy lại với cùng hạt giống cho CSV, `summary.json`, hình và báo cáo `.md` giống hệt từng byte. Riêng `config.json` có trường `generated_at`, còn `tests.txt` và `.docx` có thời gian chạy, nên các file này khác nhau giữa các lần chạy.
+
+Tùy chọn: `--no-docx`, `--no-tests`. Mỗi thí nghiệm cũng chạy riêng được, ví dụ `python -m num41.run_n2 --sensitivity`.

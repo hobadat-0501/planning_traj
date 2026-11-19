@@ -36,22 +36,22 @@ def _p_str(p: float) -> str:
 
 
 def build_report_markdown(root: Path, fig_prefix: str = "../figs/") -> str:
-    """Tạo toàn văn báo cáo Markdown 9 mục theo SPEC §7 từ logs/old, logs/new, figs/."""
-    with open(root / "logs" / "old" / "summary.json", encoding="utf-8") as f:
+    """Tạo toàn văn báo cáo Markdown 9 mục theo SPEC §7 từ logs/A, logs/B, figs/."""
+    with open(root / "logs" / "A" / "summary.json", encoding="utf-8") as f:
         so = json.load(f)
-    with open(root / "logs" / "new" / "summary.json", encoding="utf-8") as f:
+    with open(root / "logs" / "B" / "summary.json", encoding="utf-8") as f:
         sn = json.load(f)
-    with open(root / "logs" / "old" / "calibration.json", encoding="utf-8") as f:
+    with open(root / "logs" / "A" / "calibration.json", encoding="utf-8") as f:
         co = json.load(f)
-    with open(root / "logs" / "new" / "calibration.json", encoding="utf-8") as f:
+    with open(root / "logs" / "B" / "calibration.json", encoding="utf-8") as f:
         cn = json.load(f)
-    with open(root / "logs" / "old" / "config.json", encoding="utf-8") as f:
+    with open(root / "logs" / "A" / "config.json", encoding="utf-8") as f:
         cfgo = json.load(f)
-    with open(root / "logs" / "new" / "config.json", encoding="utf-8") as f:
+    with open(root / "logs" / "B" / "config.json", encoding="utf-8") as f:
         cfgn = json.load(f)
     with open(root / "figs" / "analysis_results.json", encoding="utf-8") as f:
         an = json.load(f)
-    alpha_df = pd.read_csv(root / "logs" / "new" / "alpha_sweep.csv")
+    alpha_df = pd.read_csv(root / "logs" / "B" / "alpha_sweep.csv")
 
     # Trích các chỉ số tổng hợp chính để dùng xuyên suốt (100% truy xuất từ JSON)
     bo_o = so["by_method"]["B0"]
@@ -427,8 +427,8 @@ def build_report_markdown(root: Path, fig_prefix: str = "../figs/") -> str:
     add("python run_all.py --seed-base 0")
     add("```")
     add("")
-    add("- `logs/old/`: `config.json`, `calibration.json`, `cycles.csv`, `episodes.csv`, `summary.json` (đủ 5 file theo SPEC §6).")
-    add("- `logs/new/`: `config.json`, `calibration.json`, `cycles.csv`, `episodes.csv`, `summary.json`, `alpha_sweep.csv` (đủ 6 file theo SPEC §6).")
+    add("- `logs/A/`: `config.json`, `calibration.json`, `cycles.csv`, `episodes.csv`, `summary.json` (đủ 5 file theo SPEC §6).")
+    add("- `logs/B/`: `config.json`, `calibration.json`, `cycles.csv`, `episodes.csv`, `summary.json`, `alpha_sweep.csv` (đủ 6 file theo SPEC §6).")
     add("- `figs/`: `H1_coverage_by_condition.{png,pdf}`, `H2_inf_samples_and_thinning.{png,pdf}`, `H3_B3_vs_B3prime_vs_DX1.{png,pdf}`, `H4_safety_efficiency_alpha_sweep.{png,pdf}`, `H5_cert_conditional_vs_PAC.{png,pdf}`, `H6_DX2_by_localization_group.{png,pdf}`, `analysis_results.json`.")
     add("")
 

@@ -1,4 +1,4 @@
-"""Chạy mô phỏng Phương án A — phương án cũ (bản thảo v0.1) và xuất logs/old/."""
+"""Chạy mô phỏng Phương án A — phương án cũ (bản thảo v0.1) và xuất logs/A/."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Chạy mô phỏng Phương án B — phương án mới và xuất logs/new/ (kèm alpha_sweep.csv)."""
+"""Chạy mô phỏng Phương án B — phương án mới và xuất logs/B/ (kèm alpha_sweep.csv)."""
 
 from __future__ import annotations
 
@@ -410,7 +410,7 @@ def run_new(
         keep_empty=False,
     )
 
-    # 7. Quét alpha in {0.01, 0.02, 0.05, 0.1, 0.2} cho B1, B3′, ĐX-2 -> logs/new/alpha_sweep.csv
+    # 7. Quét alpha in {0.01, 0.02, 0.05, 0.1, 0.2} cho B1, B3′, ĐX-2 -> logs/B/alpha_sweep.csv
     sweep_rows: list[dict[str, Any]] = []
     sweep_tasks: list[tuple[Any, ...]] = []
     sweep_meta: dict[tuple[str, float], dict[str, Any]] = {}

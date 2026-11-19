@@ -1,5 +1,6 @@
 # ĐẶC TẢ KỸ THUẬT — Mô phỏng phương án cũ / mới
 
+*Phiên bản 0.4 — 19/11/2026 — thêm §10: tái lập Mục 4.1 (nghiên cứu số, dữ liệu tổng hợp), đã duyệt*
 *Phiên bản 0.3 — 16/11/2026 — §1–§9 (v0.1 và mở rộng v0.2) đã duyệt và hoàn thành*
 
 ## 1. Lõi mô phỏng (dùng chung cho A và B)
@@ -308,3 +309,156 @@ Thêm một phụ lục "Kết quả mở rộng v0.2" vào báo cáo, hoặc l�
 - Log v0.1 (`logs/old`, `logs/new`) không bị ghi đè. Kết quả S1–S4 × D0–D5 tái lập đúng (TC-01).
 - `python run_ext.py --seed-base 0` sinh lại toàn bộ `logs/ext/` và các hình H7–H11.
 - Mọi kết luận mới trong báo cáo truy được về `logs/ext/`. Kết luận nào không được dữ liệu ủng hộ (ví dụ ACI ở điểm ③) phải được sửa hoặc rút lại.
+
+---
+
+## 10. Tái lập Mục 4.1 — nghiên cứu số trên dữ liệu tổng hợp (đã duyệt 19/11/2026)
+
+**Phạm vi:**
+- Mở vòng, không có planner, không có vòng kín.
+- Mỗi **mẫu** là một lần lập kế hoạch cùng một tác nhân, trên chân trời H = 30 bước, Δt = 0,1 s, τ = 1..30.
+- Gói mã `num41/` độc lập với `sim/`. Chỉ dùng lại `sim.common.conformal_q`.
+
+**Nguồn:** Mục 4.1 bản thảo v0.1. Các mục đánh dấu **[GĐ]** là giả định không có trong bản thảo (U1–U12, PLAN §10.2). Nếu NCS cung cấp được mã hoặc ghi chép gốc thì thay các mục [GĐ] theo đó, và tăng phiên bản đặc tả.
+
+### 10.1. Mô hình sinh một mẫu
+
+Hệ trục: gốc tại vị trí xe lúc lập kế hoạch, trục x theo hướng xe. Mọi phép tính đều vector hóa theo lô (n, H).
+
+| Đại lượng | Công thức | Nguồn |
+|---|---|---|
+| Vận tốc kế hoạch | v ~ U(0,8; 2,0) m/s | Bản thảo |
+| Kế hoạch xe | p̂_τ = (v·τΔt, 0) | Bản thảo |
+| Sai số định vị | ε_τ ∈ ℝ², AR(1) dừng theo từng trục: ε_0 ~ N(0, σ_loc²), ε_τ = φ_L·ε_{τ−1} + √(1−φ_L²)·σ_loc·ξ_τ, với φ_L = exp(−Δt/5 s) | Gauss σ_loc: bản thảo. Dạng trôi AR(1), hằng số thời gian 5 s: **[GĐ U1]** |
+| Sai số bám | η_τ ∈ ℝ², AR(1) dừng theo từng trục: η_0 ~ N(0, σ_trk²), φ_T = exp(−Δt/1,0 s), σ_trk = 0,05 m | Dạng AR(1): bản thảo. Tham số: **[GĐ U2]** |
+| Trễ | δ ~ U(0; 0,15) s, không đổi trong mẫu; làm xe chậm dọc đường một đoạn (−v·δ, 0) | Bản thảo |
+| Tư thế thực của xe | p_τ = p̂_τ + ε_τ + η_τ + (−v·δ, 0) | Bản thảo |
+| Sai số hướng ψ | Bỏ qua, vì xe là đĩa; r_max·\|Δψ\| = 0 | **[GĐ U3]** |
+| Số tác nhân | Một tác nhân mỗi mẫu, nên 𝒥 luôn khác rỗng | **[GĐ U4]** |
+| Vị trí đầu của tác nhân | o_0 = (x_0, y_0), với x_0 ~ U(3; 8) m, y_0 ~ U(−4; 4) m | Bản thảo |
+| Hướng của tác nhân | Hướng tới điểm (x_c, 0) trên đường xe, với x_c ~ U(0; 6) m: θ_0 = atan2(−y_0, x_c − x_0) | "Đi về phía đường của xe": bản thảo. Chọn điểm đích: **[GĐ U5]** |
+| Tốc độ của tác nhân | s_0 ~ U(0,8; 3,0) m/s | Bản thảo |
+| Dự báo | Vận tốc hằng từ trạng thái đầu đúng: ô_τ = o_0 + s_0·τΔt·(cos θ_0, sin θ_0) | Bản thảo |
+| Chuyển động thật | Unicycle, tích phân Euler: θ_τ = θ_{τ−1} + ω·Δt; s_τ = max(0, s_{τ−1} + a·Δt); o_τ = o_{τ−1} + s_τ·Δt·(cos θ_τ, sin θ_τ). Mặc định **U6-A:** ω ~ N(0; 0,25²) rad/s và a ~ N(0; 0,4²) m/s², lấy một lần cho mỗi mẫu. Biến thể **U6-B:** ω_τ, a_τ lấy độc lập ở từng bước, cùng độ lệch chuẩn | Độ lệch chuẩn: bản thảo. Hằng hay đổi theo bước: **[GĐ U6]** |
+| Hình bao | Xe r_e = 0,52 m, tác nhân r_a = 0,35 m | Bản thảo |
+
+Ghi chú về chuyển động thật: với U6-A, θ_1 = θ_0 + ω·Δt và s_1 = s_0 + a·Δt, nên quỹ đạo thật lệch khỏi dự báo ngay từ bước đầu. Quy ước này được giữ cố định, không đổi sau khi đã duyệt.
+
+### 10.2. Điểm số và các loại biên
+
+- Khoảng cách: d̂_τ = ‖p̂_τ − ô_τ‖ − (r_e + r_a) và d_τ = ‖p_τ − o_τ‖ − (r_e + r_a). Khoảng cách có thể âm (hai đĩa chồng nhau); không cắt về 0.
+- Chuẩn hóa: σ_τ = 0,05 + 0,04·τ (m), τ = 1..30.
+- Điểm số gộp: R = max_τ (d̂_τ − d_τ)/σ_τ (công thức (5)).
+- Sai số tác nhân: A = max_τ ‖o_τ − ô_τ‖/σ_τ.
+- Sai số xe: E = max_τ ‖p_τ − p̂_τ‖/σ_τ.
+- Ngưỡng: q(S, α) = `conformal_q(S, α)` = S_(k), với k = ⌈(n+1)(1−α)⌉ (công thức (6)); bằng +∞ nếu k > n.
+
+| Mã | Ngưỡng chuẩn hóa | Sự kiện "phủ" trên mẫu kiểm tra | Nguồn |
+|---|---|---|---|
+| ĐX | q_R = q(R_cal, α) | R ≤ q_R | Bản thảo |
+| B1 | q_A = q(A_cal, α) | R ≤ q_A | Bản thảo: B1 như [7]. Sự kiện phủ: **[GĐ U10]** |
+| B3 | q(A_cal, α/2) + q(E_cal, α/2) | R ≤ ngưỡng | Bản thảo (α_a = α_e = 0,05) |
+| B4 | q(A_cal, α) + max(E_cal) | R ≤ ngưỡng | **[GĐ U11]** |
+| ĐX theo nhóm | q_g = q(R_cal theo nhóm g, α) | Với mẫu kiểm tra thuộc nhóm g: R ≤ q_g | Bản thảo (Hệ quả 1) |
+
+Bất đẳng thức tam giác cho d̂_τ − d_τ ≤ ‖Δp_τ‖ + ‖Δy_τ‖, suy ra R ≤ A + E với mọi mẫu. Đây là cơ sở của Mệnh đề 3 và được kiểm bằng TC-41a.
+
+### 10.3. Thí nghiệm
+
+| Mã | Lưới | Cỡ mẫu | Lần lặp | Ghi chú |
+|---|---|---|---|---|
+| N1 | α ∈ {0,05; 0,10; 0,20} × n ∈ {100; 500; 1000} | n hiệu chỉnh + 2000 kiểm tra | 200 | σ_loc = 0,1 m **[GĐ U7]**. Mỗi lần lặp dùng chung một mẫu hiệu chỉnh cỡ 1000 và một mẫu kiểm tra cho cả ba α; n = 100 và 500 lấy n mẫu đầu |
+| N2-σ | σ_loc ∈ {0; 0,05; 0,1; 0,2; 0,3; 0,4; 0,5} m **[GĐ U8]** | 1000 + 2000 | 50 | α = 0,1. Bốn loại biên ĐX, B1, B3, B4 dùng chung cùng một mẫu |
+| N2-ρ | ρ ∈ {−0,5; 0; 0,5; 0,9} | 1000 + 2000 | 50 | σ_loc = 0,1 m, α = 0,1; chế độ ép hướng ở §10.4 |
+| N3 | Ba nhóm trộn, xem §10.5 | 1000 + 2000 | 100 | α = 0,1 |
+| N2-S (độ nhạy) | Như N2-σ với U6-B, và với U1 thay bằng nhiễu trắng (không trôi) | 1000 + 2000 | 50 | Chỉ chạy khi N2-σ không đạt mức khớp định lượng (PLAN §10.4) |
+
+### 10.4. Chế độ ép tương quan ρ (N2-ρ) [GĐ U9]
+
+1. Sinh mẫu như §10.1, rồi lấy véc tơ sai số xe gốc e_τ = p_τ − p̂_τ và sai số tác nhân Δy_τ = o_τ − ô_τ.
+2. Gọi n̂_τ = unit(ô_τ − p̂_τ) là phương kế hoạch từ xe tới tác nhân. Phần hụt do tác nhân có dấu là c_A,τ = −Δy_τ·n̂_τ; c_A,τ > 0 nghĩa là tác nhân lại gần hơn dự báo.
+3. Gọi g_τ = sgn(c_A,τ)·n̂_τ, với sgn(0) = +1. Sai số xe đi theo g_τ thì cùng dấu phần hụt với tác nhân, tức "cùng hướng".
+4. Gọi u_τ = e_τ/‖e_τ‖ là hướng gốc của sai số xe.
+5. Thay sai số xe bằng e′_τ = ‖e_τ‖ · unit(ρ·g_τ + √(1−ρ²)·u_τ). Độ lớn sai số xe giữ nguyên, chỉ đổi hướng. Khi ρ = 0 thì e′ = e, tức trùng mô hình gốc.
+6. Ghi thêm tương quan thực nghiệm ρ_emp = corr(e′_τ·n̂_τ, c_A,τ), tính trên mọi (mẫu, τ). ρ_emp chỉ dùng để mô tả; không đòi ρ_emp = ρ.
+7. Chạy thử nghiệm (19/11/2026, 10 lần lặp): tỉ số q_ĐX/q_B3 lần lượt là 0,213 / 0,214 / 0,225 / 0,347 tại ρ = −0,5 / 0 / 0,5 / 0,9, với ρ_emp = −0,14 / 0,07 / 0,27 / 0,54. Bản thảo ghi 0,23 → 0,31: khớp xu hướng tăng. Phương án đã loại: lấy g = −Δy/‖Δy‖ trộn với một hướng ngẫu nhiên, cho tỉ số gần như không đổi (khoảng 0,29).
+
+### 10.5. Trộn nhóm định vị (N3) [GĐ U12]
+
+| Nhóm | σ_loc (m) | Xác suất |
+|---|---|---|
+| fix | 0,03 | 0,7 |
+| float | 0,3 | 0,2 |
+| loss | 1,0 | 0,1 |
+
+- Nhãn nhóm của mỗi mẫu lấy theo phân phối đa thức (không cố định số mẫu mỗi nhóm), áp cho cả tập hiệu chỉnh và tập kiểm tra.
+- Ngưỡng chung q = q(R_cal, α).
+- Ngưỡng theo nhóm q_g tính trên R_cal của nhóm g. Nếu k > n_g thì q_g = +∞; trường hợp này được ghi lại, và với n ≈ 100 ở α = 0,1 thì không xảy ra.
+- Độ phủ được tính riêng cho từng nhóm trên tập kiểm tra.
+
+### 10.6. Hạt giống
+
+- Mỗi luồng ngẫu nhiên: `np.random.default_rng(np.random.SeedSequence(entropy=2026, spawn_key=(exp_id, cell_id, rep, split)))`.
+- exp_id: N1 = 1, N2-σ = 2, N2-ρ = 3, N3 = 4, N2-S = 5.
+- cell_id: chỉ số trong lưới của thí nghiệm. Riêng N1 dùng cell_id = 0 cho mọi ô, vì các ô (α, n) chung một mẫu trong mỗi lần lặp.
+- split: 0 = hiệu chỉnh, 1 = kiểm tra.
+- Hệ quả: trong cùng một lần lặp, các loại biên và các mức α dùng chung đúng một mẫu. Kết quả không phụ thuộc vào số tiến trình chạy song song.
+
+### 10.7. Log (`logs/num41/`)
+
+```
+config.json        toàn bộ tham số §10.1–10.6, phiên bản đặc tả, biến thể U6/U1, thời điểm sinh
+n1_coverage.csv    alpha, n, rep, q, coverage
+n2_bounds.csv      variant, sigma_loc, rep, method (DX/B1/B3/B4), q, coverage
+n2_rho.csv         rho, rep, q_dx, q_b3, ratio, rho_emp, cov_dx
+n3_groups.csv      rep, group, n_cal_g, n_test_g, q_global, q_group, cov_global, cov_group
+summary.json       giá trị trung bình ± độ lệch chuẩn cho mọi ô; số lần vi phạm q_DX ≤ q_B3;
+                   kết quả so chuẩn lý thuyết N1
+tests.txt          kết quả pytest TC-41a..e
+```
+
+Hình: `figs/N0_samples`, `figs/N1_coverage`, `figs/N2_bounds` (a: độ phủ, b: ngưỡng, c: tỉ số theo ρ). Mỗi hình xuất cả `.png` và `.pdf`.
+
+### 10.8. Kiểm thử
+
+| Mã | Nội dung | Tiêu chí |
+|---|---|---|
+| TC-41a | R ≤ A + E trên 10⁵ mẫu ngẫu nhiên, cả chế độ ρ | Không có mẫu vi phạm (sai số dấu phẩy động 1e-9) |
+| TC-41b | σ_loc = 0, σ_trk = 0, δ = 0, ω = a = 0 | R = A = E = 0 (±1e-12) |
+| TC-41c | Gọi lại với cùng spawn_key | Mảng giống hệt; chạy 1 và 2 tiến trình cho cùng CSV |
+| TC-41d | Tỉ lệ điểm số trùng trong một mẫu 10⁵ | < 1e-6 |
+| TC-41e | Chế độ ρ: ‖e′_τ‖ = ‖e_τ‖; ρ = 0 cho e′ = e; trung bình cos(e′_τ, g_τ) và ρ_emp tăng đơn điệu theo ρ | Đạt cả ba điều kiện |
+
+### 10.9. Tiêu chí nghiệm thu
+
+- Theo PLAN §10.4: N1 khớp chuẩn lý thuyết (bắt buộc); N2 và N3 khớp định tính (bắt buộc), khớp định lượng (mong muốn).
+- TC-41a..e đạt; các test cũ TC-01..TC-18 vẫn đạt.
+- `python -m num41.run_all --seed 2026` sinh lại toàn bộ log và hình, giống hệt khi chạy lại.
+- Mọi con số trong `report/BAO_CAO_TAI_LAP_4_1.md` truy được về `logs/num41/`. Mọi mục [GĐ] được liệt kê trong báo cáo.
+
+### 10.10. Chạy thử khả thi của đặc tả (19/11/2026, mã nháp, chưa phải kết quả chính thức)
+
+- Mã nháp viết theo §10.1–10.5, chạy 10 lần lặp mỗi ô (bản chính thức chạy 50–100 lần), hạt giống tùy ý.
+- Mục đích: kiểm tra các giả định [GĐ] có cho kết quả gần bản thảo hay không, trước khi duyệt.
+- Các số dưới đây **không** được dùng trong báo cáo.
+
+| Đại lượng | Bản thảo v0.1 | Chạy thử |
+|---|---|---|
+| Độ phủ ĐX theo σ_loc từ 0 đến 0,5 m | 0,898–0,903 | 0,896–0,904 |
+| Độ phủ B1 tại σ_loc = 0 / 0,2 / 0,5 m | 0,996 / 0,972 / 0,802 | 0,998 / 0,970 / 0,796 |
+| q_ĐX / q_B3 tại σ_loc = 0,1 m | 1,82 / 7,81 | 1,75 / 8,06 |
+| q_ĐX / q_B3 tại σ_loc = 0,5 m | 5,77 / 18,0 | 5,90 / 18,13 |
+| q_B4 tại σ_loc = 0,1 / 0,5 m | 9,21 / 25,6 | 9,65 / 25,54 |
+| Số lần q_ĐX > q_B3 | 0 (Mệnh đề 3) | 0 |
+| Tỉ số q_ĐX/q_B3 khi ρ = −0,5 → 0,9 | 0,23 → 0,31 | 0,213 → 0,347 |
+| Ngưỡng chung | 2,37 | 2,32 |
+| Độ phủ với ngưỡng chung: fix / float / loss | 0,963 / 0,818 / 0,620 | 0,969 / 0,817 / 0,593 |
+| Ngưỡng theo nhóm: fix / float / loss | 1,74 / 3,34 / 12,18 | 1,57 / 3,45 / 12,09 |
+| Độ phủ với ngưỡng theo nhóm | 0,899–0,900 | 0,895–0,908 (chỉ 20 lần lặp) |
+
+**Nhận xét:**
+- Với U1–U12 như trên, mọi tiêu chí khớp định tính đều đạt.
+- Hầu hết các số nằm trong mức khớp định lượng (độ phủ ±0,02, ngưỡng ±15%).
+- Riêng tỉ số theo ρ chỉ khớp xu hướng: tại ρ = 0,9, chạy thử cho 0,347, bản thảo ghi 0,31, lệch khoảng 12%.
+- Kết luận: các giả định đề xuất nhiều khả năng gần với cách tác giả đã làm ở v0.1.
+

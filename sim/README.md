@@ -12,4 +12,4 @@ python run_all.py --seed-base 0
 python run_ext.py --seed-base 0
 ```
 
-Mọi hạt giống đều được cố định theo `seed_base` nên chạy lại cho kết quả tất định (`< 1e-9`), bảo toàn hoàn toàn `logs/old/` và `logs/new/` khi chạy mở rộng v0.2.
+Mọi hạt giống đều được cố định theo `seed_base` nên chạy lại cho kết quả tất định (`< 1e-9`), bảo toàn hoàn toàn `logs/A/` và `logs/B/` khi chạy mở rộng v0.2.

@@ -31,8 +31,8 @@ def main() -> None:
     args = parser.parse_args()
 
     root = Path(__file__).resolve().parent
-    logs_old = root / "logs" / "old"
-    logs_new = root / "logs" / "new"
+    logs_old = root / "logs" / "A"
+    logs_new = root / "logs" / "B"
     figs_dir = root / "figs"
 
     t_start = time.perf_counter()
@@ -43,12 +43,12 @@ def main() -> None:
         shared_b0 = run_shared_b0_all(seed_base=args.seed_base, workers=args.workers)
         print(f"      Xong B0 dùng chung sau {time.perf_counter() - t0:.1f}s.", flush=True)
 
-        print("[2/4] Chạy Phương án A (cũ) -> logs/old/...", flush=True)
+        print("[2/4] Chạy Phương án A (cũ) -> logs/A/...", flush=True)
         t0 = time.perf_counter()
         run_old(logs_old, seed_base=args.seed_base, workers=args.workers, shared_b0=shared_b0, alpha=args.alpha)
         print(f"      Xong Phương án A sau {time.perf_counter() - t0:.1f}s.", flush=True)
 
-        print("[3/4] Chạy Phương án B (mới) + quét alpha -> logs/new/...", flush=True)
+        print("[3/4] Chạy Phương án B (mới) + quét alpha -> logs/B/...", flush=True)
         t0 = time.perf_counter()
         run_new(logs_new, seed_base=args.seed_base, workers=args.workers, shared_b0=shared_b0, alpha=args.alpha)
         print(f"      Xong Phương án B sau {time.perf_counter() - t0:.1f}s.", flush=True)

@@ -46,7 +46,7 @@ def main() -> None:
             v01_params = ood_res["v01_params"]
             print(f"      Xong T10 sau {time.perf_counter() - t0:.1f}s.", flush=True)
         else:
-            with open(root / "logs" / "new" / "calibration.json", encoding="utf-8") as f:
+            with open(root / "logs" / "B" / "calibration.json", encoding="utf-8") as f:
                 cal_v01 = json.load(f)
             sigma_tau = np.array(cal_v01["sigma_tau"], dtype=float)
             from sim.common import CALIB_BLOCK_SEEDS, run_parallel_episodes

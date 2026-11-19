@@ -461,7 +461,7 @@ def run_ood_and_recal(
     alpha: float = 0.10,
 ) -> dict[str, Any]:
     """Chạy đầy đủ tập IN, OOD-S, OOD-D, OOD-SD và RECAL, ghi logs/ext/."""
-    logs_new = root / "logs" / "new"
+    logs_new = root / "logs" / "B"
     logs_ext = root / "logs" / "ext"
     logs_ext.mkdir(parents=True, exist_ok=True)
 

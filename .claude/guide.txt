@@ -1,0 +1,947 @@
+Phần 0. Đọc trước khi bắt đầu
+
+0.1. Mục tiêu của tài liệu
+
+Tài liệu hướng dẫn từng bước dựng và chạy toàn bộ phần mô phỏng CARLA của bài báo số 1. Đi hết tài liệu, nhóm có:
+
+- môi trường CARLA và ROS 2 chạy ổn định;
+- xe tự hành Tesla Model 3 (vật lý CARLA) được nhận dạng tham số và có bộ chuyển lệnh;
+- bộ phát nhiễu định vị D0–D5;
+- các kịch bản S1–S4;
+- bộ dự báo, bộ hiệu chỉnh biên, bộ lập kế hoạch và bộ bám;
+- chương trình chạy hàng loạt thí nghiệm E4–E8;
+- script sinh hình và bảng cho bài báo.
+
+Các bước đánh số C1–C9 khớp với khung chi tiết bài báo 1.
+
+0.2. Quy ước bắt buộc
+
+1.  Mã trong tài liệu là mã khung, chưa chạy kiểm chứng. Sinh viên phải chạy thử, sửa lỗi và ghi lại thay đổi vào git. Không coi mã mẫu là đúng khi chưa có phép thử ở mục “Kiểm tra”.
+2.  Không sửa dữ liệu thô. Mọi xử lý ghi ra file mới.
+3.  Mỗi lượt chạy lưu kèm: run_id, hạt giống, git commit, file cấu hình, phiên bản CARLA.
+4.  Không xóa lượt chạy bất lợi. Lượt lỗi được đánh dấu và ghi lý do.
+5.  Tham số xe lấy từ nhận dạng Tesla Model 3 trong CARLA (mục 2.4). Tham số nhiễu định vị lấy theo các mức thiết kế ở mục 3.2 (có nêu căn cứ). Giá trị chưa có căn cứ ghi rõ là TẠM.
+
+0.3. Lựa chọn phiên bản
+
+- CARLA 0.9.16 (nền Unreal Engine 4.26).
+  - Bản này hỗ trợ ROS 2 trực tiếp từ máy chủ CARLA, không cần cầu nối [1].
+  - Bản 0.10.0 chuyển sang Unreal Engine 5.5 [2]; tài liệu này không dùng bản đó vì nặng hơn và một số chức năng còn đang chuyển đổi.
+- Ubuntu 22.04, ROS 2 Humble, Python 3.10.
+- Cách kết nối: dùng Python API của CARLA bên trong chương trình của nhóm. Không phụ thuộc cầu nối ROS 2.
+  - Lý do: cầu nối chính thức ros-bridge chỉ hỗ trợ ROS 2 Foxy trong tài liệu gốc; muốn dùng Humble phải dùng các nhánh do cộng đồng duy trì [3].
+  - Phương án này cho phép chạy hàng loạt nhanh và tất định.
+
+0.4. Kiến trúc tổng thể
+
+Phần lõi thuật toán được viết thành thư viện Python thuần av_core, gồm:
+
+- dự báo;
+- hiệu chỉnh;
+- lập kế hoạch;
+- bộ bám;
+- tính khoảng cách.
+
+Thư viện này được dùng theo hai cách:
+
+1.  Chạy hàng loạt trên CARLA (chế độ khóa bước): một chương trình gọi trực tiếp av_core sau mỗi bước mô phỏng. Đây là cách chạy E1–E8: nhanh, tất định, lặp lại được theo hạt giống.
+2.  Chạy qua ROS 2: các nút ROS 2 chỉ là lớp bọc mỏng quanh av_core. Dùng cho:
+    - kiểm tra tương đương giữa hai cách chạy;
+    - đo thời gian thực (E8);
+    - chuyển nguyên sang xe Hunter SE.
+
+                  ┌─────────────────────────────────────────────┐
+                  │           av_core (Python thuần)             │
+                  │ predictor · calibrator · planner · tracker   │
+                  │ geometry (đa giác, khoảng cách) · logger     │
+                  └───────────────┬─────────────────┬───────────┘
+                                  │                 │
+              Chạy hàng loạt (khóa bước)       Nút ROS 2 (bọc mỏng)
+              sim_runner.py + CARLA API        dùng chung cho CARLA và Hunter SE
+
+0.5. Cây thư mục dự án
+
+    av_conformal/
+    ├── configs/            # YAML: xe, nhiễu, kịch bản, thí nghiệm
+    ├── av_core/            # thư viện lõi
+    │   ├── actuation.py    # bộ chuyển lệnh (v, delta) -> VehicleControl, bộ đệm trễ
+    │   ├── geometry.py     # đa giác, khoảng cách
+    │   ├── noise.py        # bộ phát nhiễu định vị D0–D5
+    │   ├── predictor.py    # dự báo (vận tốc hằng, Trajectron++)
+    │   ├── calibrator.py   # sigma_tau, q-hat, theo nhóm, thích nghi
+    │   ├── planner.py      # Frenet có ràng buộc biên
+    │   ├── tracker.py      # Pure Pursuit
+    │   └── evaluator.py    # đánh giá trễ H bước, tính R
+    ├── carla_env/          # mọi thứ liên quan CARLA
+    │   ├── world.py        # kết nối, chế độ đồng bộ, dọn dẹp
+    │   ├── ego.py          # sinh Tesla Model 3, trích tham số
+    │   └── scenarios.py    # S1–S4
+    ├── scripts/
+    │   ├── sim_runner.py   # chạy một lượt
+    │   ├── batch.py        # chạy hàng loạt
+    │   ├── calibrate.py    # Thuật toán 1 + chứng nhận
+    │   └── make_figures.py # sinh hình, bảng
+    ├── ros2_ws/src/av_conformal_ros/   # các nút ROS 2 bọc av_core
+    ├── data/raw/           # dữ liệu thô (KHÔNG sửa)
+    ├── data/processed/
+    └── figures/
+
+0.6. Phân công sinh viên gợi ý
+
+  ------------------------------------------------------------------------------------------------------------
+  Nhóm                 Phụ trách                                                       Bước
+  -------------------- --------------------------------------------------------------- -----------------------
+  SV-A (CARLA)         Cài đặt, chế độ đồng bộ, Tesla Model 3 và nhận dạng, kịch bản   C1, C2, C4
+
+  SV-B (định vị)       Bộ phát nhiễu, EKF, nhóm định vị                                C3
+
+  SV-C (dự báo)        Thu dữ liệu, bộ dự báo                                          C5
+
+  SV-D (thống kê)      Bộ đánh giá, hiệu chỉnh, thống kê, hình                         C6, C7, C9
+
+  NCS                  Lập kế hoạch, tích hợp, thí nghiệm, kiểm tra kết quả            C6–C8, duyệt mọi bước
+  ------------------------------------------------------------------------------------------------------------
+
+Phần 1. Bước C1 – Cài đặt môi trường
+
+1.1. Yêu cầu máy
+
+- CPU từ 8 nhân, RAM ≥ 32 GB.
+- GPU NVIDIA ≥ 8 GB VRAM; nên dùng loại 12 GB trở lên nếu chạy nhiều máy chủ CARLA song song.
+- Ổ SSD còn trống ≥ 150 GB.
+- Ubuntu 22.04, driver NVIDIA bản mới.
+
+Kiểm tra GPU và driver:
+
+    nvidia-smi          # phải thấy tên GPU và phiên bản driver
+
+1.2. Cài CARLA 0.9.16 (bản dựng sẵn)
+
+1.  Tải CARLA_0.9.16.tar.gz và AdditionalMaps_0.9.16.tar.gz từ trang phát hành chính thức trên GitHub [4].
+2.  Giải nén và chạy thử:
+
+    mkdir -p ~/carla && cd ~/carla
+    tar -xzf CARLA_0.9.16.tar.gz
+    # bản đồ bổ sung: chép file nén vào thư mục Import rồi chạy script
+    cp AdditionalMaps_0.9.16.tar.gz Import/ && ./ImportAssets.sh
+
+    # chạy máy chủ có cửa sổ (kiểm tra lần đầu)
+    ./CarlaUE4.sh -quality-level=Low
+
+    # chạy không cửa sổ (khi chạy hàng loạt)
+    ./CarlaUE4.sh -RenderOffScreen -quality-level=Low -carla-rpc-port=2000
+
+- Cổng mặc định là 2000. Traffic Manager mặc định dùng cổng 8000.
+
+1.3. Môi trường Python
+
+Phiên bản thư viện carla của máy khách phải trùng phiên bản máy chủ.
+
+    python3.10 -m venv ~/venv/carla && source ~/venv/carla/bin/activate
+    pip install --upgrade pip
+    # cài gói carla từ thư mục dist đi kèm bản CARLA (chọn file .whl đúng cp310)
+    pip install ~/carla/PythonAPI/carla/dist/carla-0.9.16-cp310-*.whl
+    pip install numpy scipy pandas pyarrow matplotlib statsmodels shapely pyyaml tqdm
+
+Nếu thư mục dist không có file .whl cho Python 3.10, thử pip install carla==0.9.16. Ghi lại cách đã dùng.
+
+Kiểm tra C1-a – kết nối và đọc bản đồ:
+
+    import carla
+    client = carla.Client("localhost", 2000); client.set_timeout(20.0)
+    print(client.get_server_version(), client.get_client_version())  # phải trùng nhau
+    world = client.load_world("Town03")
+    print(world.get_map().name)
+
+1.4. Cài ROS 2 Humble
+
+Cài theo hướng dẫn chính thức của ROS 2 Humble cho Ubuntu 22.04 (gói ros-humble-desktop). Sau đó tạo workspace:
+
+    sudo apt install ros-humble-desktop python3-colcon-common-extensions \
+                     ros-humble-robot-localization ros-humble-ackermann-msgs
+    mkdir -p ~/av_conformal/ros2_ws/src && cd ~/av_conformal/ros2_ws
+    source /opt/ros/humble/setup.bash && colcon build
+
+ROS 2 chỉ cần cho phần chạy qua nút (mục 0.4, cách 2). Chạy hàng loạt không cần ROS 2.
+
+1.5. Kết nối và chế độ đồng bộ
+
+File carla_env/world.py:
+
+    import carla, random, numpy as np
+
+    class SimWorld:
+        """Quản lý kết nối CARLA, chế độ đồng bộ và dọn dẹp."""
+        def __init__(self, host="localhost", port=2000, tm_port=8000,
+                     town="Town03", dt=0.05, seed=0):
+            self.client = carla.Client(host, port); self.client.set_timeout(30.0)
+            self.world = self.client.load_world(town)
+            self.dt = dt
+            s = self.world.get_settings()
+            s.synchronous_mode = True          # máy chủ chỉ chạy khi gọi tick()
+            s.fixed_delta_seconds = dt         # bước cố định 0,05 s = 20 Hz
+            s.no_rendering_mode = False        # True khi chạy hàng loạt không cần hình
+            self.world.apply_settings(s)
+            self.tm = self.client.get_trafficmanager(tm_port)
+            self.tm.set_synchronous_mode(True)
+            self.tm.set_random_device_seed(seed)
+            self.world.set_pedestrians_seed(seed)
+            random.seed(seed); np.random.seed(seed)
+            self.actors = []
+
+        def tick(self):
+            return self.world.tick()           # trả về số khung hình
+
+        def spawn(self, bp, tf):
+            a = self.world.try_spawn_actor(bp, tf)
+            if a is not None: self.actors.append(a)
+            return a
+
+        def close(self):
+            """LUÔN gọi khi kết thúc, kể cả khi lỗi (dùng try/finally)."""
+            self.client.apply_batch([carla.command.DestroyActor(a) for a in self.actors])
+            s = self.world.get_settings()
+            s.synchronous_mode = False; s.fixed_delta_seconds = None
+            self.world.apply_settings(s)
+            self.tm.set_synchronous_mode(False)
+
+Lưu ý quan trọng. Nếu chương trình dừng giữa chừng mà không trả máy chủ về chế độ bất đồng bộ, máy chủ sẽ “đứng” chờ tick(). Khi đó khởi động lại máy chủ, hoặc chạy một script nhỏ đặt synchronous_mode=False.
+
+Kiểm tra C1-b:
+
+- Chạy 1200 bước (60 s mô phỏng).
+- In thời gian thực đã trôi và số khung hình.
+- Số khung hình phải tăng đúng 1 sau mỗi tick().
+
+1.6. Quy đổi hệ tọa độ (rất dễ sai)
+
+CARLA dùng hệ tọa độ tay trái của Unreal Engine: x tiến, y sang phải, z lên; góc yaw tính bằng độ. Thuật toán của nhóm dùng hệ tay phải như ROS (y sang trái, góc hướng tính bằng radian). Quy đổi ở một chỗ duy nhất:
+
+    import math, carla
+
+    def to_carla(px, py, psi, z=0.0):
+        """Hệ tay phải (m, rad) -> Transform của CARLA."""
+        return carla.Transform(carla.Location(x=px, y=-py, z=z),
+                               carla.Rotation(yaw=-math.degrees(psi)))
+
+    def from_carla(tf):
+        """Transform của CARLA -> (px, py, psi) hệ tay phải."""
+        return tf.location.x, -tf.location.y, -math.radians(tf.rotation.yaw)
+
+Kiểm tra C1-c:
+
+- Đặt xe tại (10, 5, 0,3 rad) qua to_carla, đọc lại bằng from_carla; sai số phải < 1e-6.
+- Cho xe chạy vòng tròn sang trái trong av_core; quan sát trên CARLA, xe phải quay sang trái.
+
+Phần 2. Bước C2 – Xe tự hành trong CARLA: Tesla Model 3
+
+2.1. Lựa chọn và hệ quả
+
+Xe tự hành trong mô phỏng là Tesla Model 3 có sẵn trong CARLA (blueprint vehicle.tesla.model3), chạy bằng mô hình vật lý của CARLA. Không dùng đồng mô phỏng.
+
+Ưu điểm:
+
+- Không phải tự viết mô hình động lực học.
+- Sai số bám phát sinh tự nhiên từ động lực học của CARLA (trượt lốp, đáp ứng ga – phanh – lái), không phải giả lập. Điều này làm phần “sai số của xe tự hành” trong bài thuyết phục hơn.
+- Xe cỡ thật, tốc độ đô thị (đến khoảng 30 km/h): phù hợp với kịch bản người đi bộ và xe máy, và quen thuộc với phản biện.
+
+Hệ quả cần ghi nhớ:
+
+- Bộ lập kế hoạch vẫn dùng mô hình xe đạp động học (mục 2.1 của bài). Tham số L, δ_(max), a_(max), a_(min) được trích và nhận dạng từ chính Tesla Model 3 trong CARLA (mục 2.3–2.4), không lấy từ Hunter SE.
+- Kết quả CARLA của bài 1 là cho xe cỡ ô tô. Hunter SE (xe nhỏ) được hiệu chỉnh biên trực tiếp trên dữ liệu xe thật ở giai đoạn sau (bài 3). Không chuyển ngưỡng từ CARLA sang Hunter SE, vì hai xe khác nhau.
+- Khoảng cách an toàn d_(s), tốc độ và tầm kích hoạt kịch bản đặt theo cỡ ô tô (mục 4.3).
+
+2.2. Sinh xe và đọc tham số vật lý – file carla_env/ego.py
+
+    import math, numpy as np, carla
+
+    def spawn_tesla(sim, spawn_tf, role="hero"):
+        bp = sim.world.get_blueprint_library().find("vehicle.tesla.model3")
+        bp.set_attribute("role_name", role)
+        ego = sim.spawn(bp, spawn_tf)          # vật lý CARLA BẬT (mặc định)
+        sim.tick()                             # cần 1 tick để vật lý khởi tạo
+        return ego
+
+    def vehicle_params(ego):
+        """Trích chiều dài cơ sở, góc lái lớn nhất, kích thước từ CARLA."""
+        pc = ego.get_physics_control()
+        w = pc.wheels                          # thứ tự: FL, FR, RL, RR
+        # vị trí bánh xe (cm, hệ toàn cục, tại thời điểm gọi) -> m
+        front = np.mean([[w[0].position.x, w[0].position.y], [w[1].position.x, w[1].position.y]], 0)/100
+        rear  = np.mean([[w[2].position.x, w[2].position.y], [w[3].position.x, w[3].position.y]], 0)/100
+        L = float(np.linalg.norm(front - rear))
+        dmax = math.radians(max(w[0].max_steer_angle, w[1].max_steer_angle))
+        ext = ego.bounding_box.extent          # nửa kích thước (m)
+        # khoảng từ tâm cầu sau đến đuôi xe: dùng vị trí bánh sau so với tâm bounding box
+        tf = ego.get_transform(); fwd = tf.get_forward_vector()
+        c = np.array([tf.location.x + ego.bounding_box.location.x, tf.location.y])  # gần đúng
+        rear_overhang = float(ext.x - np.dot(c - rear*1.0, [fwd.x, fwd.y]))         # kiểm tra bằng tay!
+        return dict(L=L, delta_max=dmax, length=2*ext.x, width=2*ext.y,
+                    rear_overhang=rear_overhang, mass=pc.mass)
+
+Lưu ý:
+
+- vehicle_params cần kiểm tra bằng tay một lần: in ra L, δ_(max), kích thước, rồi so với hình xe trong CARLA. Ghi giá trị cuối vào configs/tesla_model3.yaml và dùng cố định từ đó.
+- Góc lái thực của bánh trước phụ thuộc cả đường cong lái theo tốc độ (steering_curve). Vì vậy quan hệ lệnh lái – góc lái tương đương phải nhận dạng (mục 2.4), không suy trực tiếp từ max_steer_angle.
+- Gốc của đa giác xe đặt tại tâm cầu sau, theo đúng mô hình trong bài. Vị trí trả về của CARLA là tâm actor; quy đổi qua rear_overhang và L.
+
+2.3. Bộ chuyển lệnh – file av_core/actuation.py
+
+Bộ bám (Pure Pursuit) cho ra lệnh (v_(cmd), δ_(cmd)). CARLA nhận VehicleControl(throttle, steer, brake). Bộ chuyển lệnh gồm:
+
+- một PI vận tốc;
+- một bảng tra góc lái → steer;
+- một bộ đệm trễ để tạo các điều kiện D4, D5.
+
+    import numpy as np, carla
+    from collections import deque
+
+    class TeslaActuator:
+        def __init__(self, p, dt=0.05, delay_s=0.0):
+            self.kp, self.ki, self.dt = p["kp_v"], p["ki_v"], dt
+            self.steer_gain = p["steer_gain"]           # rad -> [-1,1], nhận dạng ở mục 2.4
+            self.i = 0.0
+            n = int(round(delay_s / dt))
+            self.buf = deque([(0.0, 0.0)]*(n + 1), maxlen=n + 1)
+
+        def set_delay(self, delay_s):                   # dùng cho D4/D5
+            n = int(round(delay_s / self.dt)); old = list(self.buf)
+            self.buf = deque((old + [old[-1]]*(n + 1))[-(n + 1):], maxlen=n + 1)
+
+        def __call__(self, v_meas, v_cmd, d_cmd):
+            self.buf.append((v_cmd, d_cmd)); v_ref, d_ref = self.buf[0]   # lệnh đã trễ
+            e = v_ref - v_meas; self.i = np.clip(self.i + e*self.dt, -5, 5)
+            u = self.kp*e + self.ki*self.i
+            thr, brk = (float(np.clip(u, 0, 1)), 0.0) if u >= 0 else (0.0, float(np.clip(-u, 0, 1)))
+            if v_ref < 0.05 and v_meas < 0.3: thr, brk = 0.0, 1.0      # giữ xe đứng yên
+            steer = float(np.clip(self.steer_gain*d_ref, -1, 1))
+            return carla.VehicleControl(throttle=thr, steer=steer, brake=brk)
+
+Lưu ý: v_meas ở đây là vận tốc đo (từ bộ định vị hoặc odometry có nhiễu), không phải vận tốc thật của CARLA.
+
+File configs/tesla_model3.yaml (điền sau khi chạy mục 2.2 và 2.4):
+
+    blueprint: vehicle.tesla.model3
+    L: null            # m, trích từ physics control
+    delta_max: null    # rad, nhận dạng
+    length: null       # m, từ bounding box
+    width: null
+    rear_overhang: null
+    a_max: null        # m/s^2, nhận dạng (ga tối đa)
+    a_min: null        # m/s^2, nhận dạng (phanh tối đa), số âm
+    v_max: 8.3         # m/s (30 km/h), giới hạn thí nghiệm đô thị
+    kp_v: 0.5          # PI vận tốc, chỉnh ở mục 2.4
+    ki_v: 0.1
+    steer_gain: null   # 1/rad, nhận dạng
+    cmd_delay: 0.0     # s, trễ nền; D4/D5 cộng thêm
+
+2.4. Nhận dạng Tesla Model 3 trong CARLA (thay cho bước H3 trên xe thật)
+
+Chạy trên bản đồ có đoạn đường thẳng dài và bãi trống (ví dụ Town04 hoặc Town10HD). Mỗi phép thử lặp ≥ 5 lần. Ghi dữ liệu 20 Hz từ giá trị chuẩn của CARLA.
+
+  --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Đại lượng                               Phép thử                                                                                      Cách tính
+  --------------------------------------- --------------------------------------------------------------------------------------------- ------------------------------------------------------------------------------------------------------
+  Quan hệ steer → góc lái tương đương δ   Giữ steer cố định ở 0,1; 0,2; …; 1,0 tại 3 m/s, chạy vòng tròn                                Bán kính R từ quỹ đạo; δ = arctan (L/R); khớp tuyến tính → steer_gain; δ_(max) = giá trị tại steer=1
+
+  Ảnh hưởng tốc độ lên góc lái            Lặp phép thử trên ở 6 và 8 m/s                                                                Nếu δ giảm theo tốc độ: lập bảng tra 2 chiều thay cho hệ số
+
+  a_(max)                                 Ga 1,0 từ 0 đến v_(max)                                                                       Đạo hàm vận tốc, lấy trung vị trong đoạn 1–5 m/s
+
+  a_(min)                                 Phanh 1,0 từ 8 m/s                                                                            Gia tốc trung bình và quãng phanh
+
+  Đáp ứng vòng vận tốc                    Bước v_(cmd) 0→5→8→3 m/s với PI                                                               Chỉnh kp_v, ki_v để vọt lố < 5%, thời gian xác lập < 3 s
+
+  Sai số bám nền                          Pure Pursuit bám quỹ đạo chuẩn (đường thẳng, cua, chữ S) ở 3, 5, 8 m/s, không nhiễu định vị   Phân phối sai số ngang và sai số hướng → báo cáo trong Bảng I
+  --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Kiểm tra C2:
+
+- Bán kính quay đo được ở steer nhỏ phải khớp L/tan δ với δ = steer_gain·steer. Sai số < 5% trong vùng tuyến tính.
+- Xe bám quỹ đạo chuẩn ở 8 m/s mà không dao động. Sai số ngang RMS được ghi lại; không đặt ngưỡng trước.
+
+Phần 3. Bước C3 – Cảm biến, định vị và suy giảm có kiểm soát
+
+3.1. Nguyên tắc
+
+- Giá trị chuẩn lấy trực tiếp từ mô hình xe (tư thế thật) và từ get_transform() của tác nhân.
+- Tư thế ước lượng (đầu vào của bộ lập kế hoạch) = giá trị chuẩn + sai số sinh bởi bộ phát nhiễu.
+- Tham số bộ phát nhiễu đặt theo các mức thiết kế cho ba trạng thái RTK (cố định / thả nổi / mất GNSS). Mỗi mức nêu căn cứ: tài liệu thông số bộ thu RTK phổ biến hoặc công bố có đo đạc. Khi có số đo trên Hunter SE (giai đoạn sau), so sánh và báo cáo chênh lệch.
+
+Nhiễu GNSS và IMU của CARLA mặc định bằng 0 [6]. Vì vậy không dựa vào nhiễu mặc định của CARLA.
+
+3.2. Bộ phát nhiễu – file av_core/noise.py
+
+    import numpy as np
+
+    class LocalizationNoise:
+        """Sai số định vị theo trạng thái RTK: 'fixed', 'float', 'lost'.
+        fixed/float: nhiễu trắng + thiên lệch Gauss–Markov.
+        lost: dead-reckoning, sai số tích lũy theo quãng đường và thời gian."""
+        def __init__(self, p, rng):
+            self.p, self.rng = p, rng
+            self.bias = np.zeros(2); self.dr = np.zeros(3)   # thiên lệch (x,y); dead-reckoning (x,y,psi)
+
+        def sample(self, state, v, psi, dt):
+            """Trả về sai số (ex, ey, epsi) trong hệ toàn cục; psi là góc hướng thật của xe."""
+            g = self.p[state]
+            if state in ("fixed", "float"):
+                beta = np.exp(-dt / g["tau_bias"])
+                self.bias = beta*self.bias + np.sqrt(1 - beta**2)*g["sigma_bias"]*self.rng.standard_normal(2)
+                exy = self.bias + g["sigma_white"]*self.rng.standard_normal(2)
+                epsi = g["sigma_yaw"]*self.rng.standard_normal()
+                self.dr[:] = [exy[0], exy[1], epsi]        # điểm xuất phát khi chuyển sang mất GNSS
+                return tuple(self.dr)
+            # lost: sai số hướng tích lũy do thiên lệch và nhiễu gyro
+            self.dr[2] += g["gyro_bias"]*dt + g["sigma_gyro"]*np.sqrt(dt)*self.rng.standard_normal()
+            # sai số vị trí: theo phương dọc (tỉ lệ odometry) và phương ngang (do sai số hướng)
+            e_long = v*dt*g["odo_scale"]*self.rng.standard_normal()
+            e_lat = v*dt*np.sin(self.dr[2])
+            self.dr[0] += e_long*np.cos(psi) - e_lat*np.sin(psi)
+            self.dr[1] += e_long*np.sin(psi) + e_lat*np.cos(psi)
+            return tuple(self.dr)
+
+Ghi chú về mô hình nhiễu.
+
+- Mô hình nhiễu khi mất GNSS ở trên là khung ban đầu. SV-B phải chỉnh dạng mô hình sao cho:
+  - sai số vị trí tăng theo thời gian mất GNSS;
+  - sai số hướng tăng theo thời gian mất GNSS;
+  - mức tăng giống đường cong đo trên xe thật.
+- Tiêu chí khớp: kiểm định Kolmogorov–Smirnov giữa phân phối sai số mô phỏng và đo thật ở mỗi nhóm, tại các mốc 1, 3, 5 s sau khi mất GNSS.
+
+File configs/noise.yaml (mức thiết kế, TẠM – NCS chốt và ghi căn cứ):
+
+    fixed: {sigma_white: 0.02, sigma_bias: 0.02, tau_bias: 10.0, sigma_yaw: 0.005}
+    float: {sigma_white: 0.10, sigma_bias: 0.25, tau_bias: 20.0, sigma_yaw: 0.02}
+    lost:  {gyro_bias: 0.002, sigma_gyro: 0.003, odo_scale: 0.03}
+
+3.3. Điều kiện suy giảm D0–D5 – file configs/conditions.yaml
+
+    D0: {rtk: fixed}
+    D1: {rtk: float}
+    D2: {rtk: fixed, outage: {start_range: [3.0, 8.0], duration_range: [5.0, 10.0]}}  # mất GNSS
+    D3: {rtk: fixed, odo_scale_mult: 3.0}        # trượt bánh: tăng sai số odometry
+    D4: {rtk: fixed, extra_delay: [0.05, 0.10, 0.20]}  # trễ cố định, chọn 1 giá trị mỗi lượt
+    D5: {rtk: fixed, extra_delay_dist: "data/meas/delay_samples.npy"}  # lấy mẫu từ phân phối đo
+
+- Trễ (D4, D5) được tạo bằng TeslaActuator.set_delay(...).
+- Với D5, mỗi chu kỳ lấy một mẫu trễ từ file. Có thể dùng bộ đệm theo thời gian thay cho bộ đệm cố định.
+
+3.4. Nhóm định vị
+
+- Nhãn nhóm g là trạng thái RTK mà xe quan sát được tại thời điểm lập kế hoạch: fixed, float hoặc lost.
+- Không lấy nhãn từ tên điều kiện (D0–D5). Ví dụ: trong D2, trước khi mất GNSS thì nhóm vẫn là fixed.
+
+3.5. EKF khi chạy qua ROS 2
+
+- Khi chạy qua nút ROS 2 (để kiểm tra tương đương và chuyển sang xe thật), dùng gói robot_localization [7].
+- Đầu vào: GNSS và IMU giả lập từ giá trị chuẩn + nhiễu cảm biến, cùng odometry.
+- So sánh phân phối sai số của EKF với bộ phát nhiễu ở mục 3.2. Báo cáo chênh lệch.
+
+Kiểm tra C3:
+
+- Vẽ sai số định vị theo thời gian cho một lượt D2. Phải thấy sai số tăng trong khoảng mất GNSS và giảm sau khi có lại.
+- Thống kê σ theo nhóm phải khớp noise.yaml (sai lệch < 10%).
+
+Phần 4. Bước C4 – Tác nhân và kịch bản S1–S4
+
+4.1. Nguyên tắc
+
+- Tác nhân chạy theo kịch bản lập trình sẵn, tham số ngẫu nhiên theo hạt giống. Không dùng autopilot ngẫu nhiên, vì cần lặp lại được.
+- Người đi bộ: điều khiển bằng carla.WalkerControl mỗi bước.
+- Xe máy và ô tô: tắt vật lý và đặt vị trí mỗi bước bằng set_transform theo quỹ đạo định sẵn. Cách này tất định và dễ kiểm soát vận tốc.
+- Kịch bản kích hoạt theo khoảng cách tới xe tự hành: tác nhân xuất hiện khi xe còn cách điểm xung đột một khoảng s_(trig) ngẫu nhiên.
+
+4.2. Mã khung – file carla_env/scenarios.py
+
+    import numpy as np, carla, math
+    from carla_env.coords import to_carla, from_carla
+
+    class CrossingPedestrian:
+        """S1: người đi bộ sang đường vuông góc với hướng xe tại điểm xung đột P."""
+        def __init__(self, sim, P, ego_heading, rng, cfg):
+            self.v = rng.uniform(*cfg["speed"])                 # 0.8–1.8 m/s
+            self.s_trig = rng.uniform(*cfg["trigger_dist"])     # m
+            self.stop_mid = rng.random() < cfg["p_stop_mid"]    # dừng giữa đường
+            side = rng.choice([-1, 1])
+            n = np.array([-math.sin(ego_heading), math.cos(ego_heading)])  # pháp tuyến trái
+            self.start = np.array(P) + side*cfg["lateral_start"]*n
+            self.dir = -side*n
+            bp = rng.choice(sim.world.get_blueprint_library().filter("walker.pedestrian.*"))
+            self.actor = sim.spawn(bp, to_carla(*self.start, ego_heading, z=1.0))
+            self.active, self.t_stop, self.P = False, None, np.array(P)
+
+        def update(self, ego_xy, t):
+            if not self.active and np.linalg.norm(ego_xy - self.P) < self.s_trig:
+                self.active = True
+            speed = self.v if self.active else 0.0
+            if self.stop_mid and self.active:
+                pos = np.array(from_carla(self.actor.get_transform())[:2])
+                if np.linalg.norm(pos - self.P) < 0.3 and self.t_stop is None: self.t_stop = t
+                if self.t_stop is not None and t - self.t_stop < 2.0: speed = 0.0
+            d = carla.Vector3D(x=self.dir[0], y=-self.dir[1], z=0.0)   # đổi sang hệ CARLA
+            self.actor.apply_control(carla.WalkerControl(direction=d, speed=speed))
+
+    class CrossingMotorbike:
+        """S2: xe máy cắt ngang qua điểm P với góc cắt và vận tốc ngẫu nhiên."""
+        def __init__(self, sim, P, ego_heading, rng, cfg):
+            self.v = rng.uniform(*cfg["speed"])                          # 3–8 m/s
+            ang = math.radians(rng.uniform(*cfg["cross_angle_deg"]))     # 30–90 độ
+            side = rng.choice([-1, 1])
+            self.heading = ego_heading + side*ang
+            self.s_trig = rng.uniform(*cfg["trigger_dist"])
+            L0 = cfg["approach_len"]
+            self.P = np.array(P)
+            self.start = self.P - L0*np.array([math.cos(self.heading), math.sin(self.heading)])
+            bp = sim.world.get_blueprint_library().find(rng.choice(cfg["blueprints"]))
+            self.actor = sim.spawn(bp, to_carla(*self.start, self.heading, z=0.3))
+            self.actor.set_simulate_physics(False)
+            self.s, self.active = 0.0, False
+
+        def update(self, ego_xy, t, dt):
+            if not self.active and np.linalg.norm(ego_xy - self.P) < self.s_trig:
+                self.active = True
+            if self.active: self.s += self.v*dt
+            xy = self.start + self.s*np.array([math.cos(self.heading), math.sin(self.heading)])
+            self.actor.set_transform(to_carla(xy[0], xy[1], self.heading, z=0.3))
+
+4.3. Cấu hình kịch bản – file configs/scenarios.yaml
+
+    S1:
+      town: Town03
+      route: [[...], [...]]          # các điểm tuyến của xe tự hành, chọn đoạn có vạch người đi bộ
+      conflict_point_s: 40.0         # m, vị trí điểm xung đột dọc tuyến
+      pedestrians: {n: [1, 3], speed: [0.8, 1.8], trigger_dist: [8, 20],
+                    lateral_start: 5.0, p_stop_mid: 0.2}
+    S2:
+      motorbikes: {n: [1, 2], speed: [3.0, 8.0], cross_angle_deg: [30, 90],
+                   trigger_dist: [10, 25], approach_len: 25.0,
+                   blueprints: [vehicle.yamaha.yzf, vehicle.kawasaki.ninja, vehicle.vespa.zx125]}
+    S3: {...}   # giao cắt không đèn: xe máy + ô tô, hướng đến và thời điểm ngẫu nhiên
+    S4: {...}   # tác nhân phía trước dừng đột ngột: gia tốc phanh 2–5 m/s^2
+
+- Tên blueprint có thể khác theo phiên bản. Kiểm tra bằng filter("vehicle.*").
+- Vận tốc xe tự hành giới hạn bằng v_max = 8,3 m/s (30 km/h). Tầm kích hoạt trigger_dist cần lớn hơn quãng phanh của Tesla Model 3 ở v_max cộng một khoảng dự trữ. Tính từ a_(min) đo ở mục 2.4, rồi chỉnh lại các khoảng trong scenarios.yaml.
+- Khoảng cách an toàn d_(s) đặt theo cỡ ô tô (ví dụ 0,5–1,0 m giữa đa giác xe và đa giác tác nhân); ghi rõ giá trị trong bài.
+
+Kiểm tra C4:
+
+- Cùng hạt giống phải cho cùng quỹ đạo tác nhân. Chạy hai lần và so sánh: sai khác = 0.
+- Mỗi kịch bản quay một video ngắn bằng camera spectator để GVHD duyệt.
+
+Phần 5. Bước C5 – Bộ dự báo
+
+5.1. Thu dữ liệu huấn luyện
+
+- Chạy S1–S4 với hạt giống 0–199, xe tự hành chạy bằng B0 (không nới biên).
+- Ghi lịch sử vị trí tác nhân ở 10 Hz: agent_id, type, t, x, y, vx, vy, yaw.
+
+5.2. Dự báo vận tốc hằng (mức nền, bắt buộc có)
+
+    import numpy as np
+    def predict_cv(track, H, dt):
+        """track: mảng [[t, x, y], ...] (≥ 2 điểm gần nhất). Trả về H vị trí tương lai."""
+        (t0, x0, y0), (t1, x1, y1) = track[-2], track[-1]
+        v = np.array([x1 - x0, y1 - y0]) / (t1 - t0)
+        return np.array([[x1, y1] + v*dt*k for k in range(1, H + 1)])
+
+5.3. Trajectron++
+
+1.  Chuyển dữ liệu sang định dạng môi trường của Trajectron++ [8]: cảnh, nút, kiểu tác nhân (người đi bộ, xe máy, ô tô), tần số 10 Hz.
+2.  Huấn luyện với lịch sử 2 s, chân trời H = 3 s (30 bước).
+3.  Báo cáo ADE và FDE trên hạt giống kiểm tra, so với dự báo vận tốc hằng.
+4.  Đóng băng mô hình. Lưu file trọng số và mã băm (hash). Không huấn luyện lại sau khi đã bắt đầu hiệu chỉnh.
+
+Với đầu ra nhiều khả năng: chọn và ghi rõ một quy tắc, ví dụ lấy khả năng gần xe tự hành nhất trong các khả năng có xác suất > 0,1.
+
+Kiểm tra C5:
+
+- Vẽ dự báo chồng lên quỹ đạo thật cho 5 tình huống chọn ngẫu nhiên.
+- ADE của Trajectron++ phải nhỏ hơn vận tốc hằng. Nếu không, xem lại dữ liệu và chuẩn hóa.
+
+Phần 6. Hình học, lập kế hoạch, bộ bám và bộ đánh giá
+
+6.1. Đa giác và khoảng cách – file av_core/geometry.py
+
+    import numpy as np
+    from shapely.geometry import Polygon
+
+    def rect_polygon(px, py, psi, length, width, rear_overhang=0.0):
+        """Đa giác chữ nhật của xe; gốc (px,py) tại tâm cầu sau (xe tự hành)
+        hoặc tâm hình (tác nhân, đặt rear_overhang = length/2)."""
+        c, s = np.cos(psi), np.sin(psi)
+        xs = np.array([-rear_overhang, length - rear_overhang, length - rear_overhang, -rear_overhang])
+        ys = np.array([-width/2, -width/2, width/2, width/2])
+        return Polygon(np.c_[px + c*xs - s*ys, py + s*xs + c*ys])
+
+    def poly_distance(A, B):
+        return A.distance(B)        # = 0 nếu giao nhau
+
+- Kích thước tác nhân lấy từ actor.bounding_box.extent; đây là nửa kích thước, nhân 2.
+- Kích thước xe tự hành lấy từ tesla_model3.yaml.
+
+6.2. Bộ lập kế hoạch Frenet – file av_core/planner.py
+
+- Xuất phát từ mã mở “Frenet Optimal Trajectory” trong bộ PythonRobotics [9]. Chuyển sang dạng lớp có ba điểm thêm vào:
+  1.  ràng buộc động học của Tesla Model 3 (tham số nhận dạng ở mục 2.4): độ cong ≤ tan δ_(max)/L, gia tốc và vận tốc;
+  2.  bộ lọc an toàn có biên: loại ứng viên có d̂_(τ)^(j) < d_(s) + σ_(τ)q tại bất kỳ τ, j nào;
+  3.  quỹ đạo dự phòng: phanh với a_(min) dọc đường hiện tại khi không còn ứng viên.
+- Lưới ứng viên:
+  - độ lệch ngang −1,5…1,5 m, bước 0,25 m;
+  - vận tốc đích 0…v_(max), bước 0,5 m/s;
+  - thời gian 3, 4, 5 s.
+- Đầu ra mỗi chu kỳ (10 Hz):
+  - quỹ đạo kế hoạch lấy mẫu tại τ = 1..H (cùng bước với dự báo);
+  - cờ fallback.
+
+6.3. Bộ bám Pure Pursuit – file av_core/tracker.py
+
+    import numpy as np
+    def pure_pursuit(x, path_xy, path_v, L, ld_min=1.0, k_ld=0.5, dmax=0.4):
+        """x = [px,py,psi,v,delta]; path_xy: (N,2); trả về (v_cmd, delta_cmd)."""
+        ld = max(ld_min, k_ld*x[3])
+        d = np.linalg.norm(path_xy - x[:2], axis=1)
+        i0 = int(np.argmin(d))
+        idx = next((i for i in range(i0, len(path_xy)) if d[i] >= ld), len(path_xy) - 1)
+        dx, dy = path_xy[idx] - x[:2]
+        alpha = np.arctan2(dy, dx) - x[2]
+        delta = np.arctan2(2*L*np.sin(alpha), ld)
+        return float(path_v[idx]), float(np.clip(delta, -dmax, dmax))
+
+Bộ bám chạy ở 20 Hz (mỗi bước CARLA). Bộ bám dùng tư thế ước lượng, không dùng giá trị chuẩn. Đây chính là nơi sai số định vị đi vào vòng kín.
+
+6.4. Bộ đánh giá trễ H bước – file av_core/evaluator.py
+
+Tại thời điểm lập kế hoạch t chưa biết khoảng cách thật. Phải chờ H bước mới tính được R.
+
+    import numpy as np
+    from collections import deque
+    from av_core.geometry import rect_polygon, poly_distance
+
+    class DelayedEvaluator:
+        def __init__(self, H, ego_dims, sigma_tau, d_s):
+            self.H, self.ego_dims, self.sigma, self.d_s = H, ego_dims, np.asarray(sigma_tau), d_s
+            self.pending = deque()
+
+        def add_plan(self, t, plan_poses, pred_agents, meta):
+            """plan_poses: (H,3) tư thế kế hoạch; pred_agents: {id: (H, 3) tư thế dự báo, dims}."""
+            self.pending.append(dict(t=t, plan=plan_poses, pred=pred_agents, meta=meta,
+                                     true_ego=[], true_ag=[]))
+
+        def add_truth(self, ego_pose, agents_truth):
+            """Gọi ở mỗi bước lập kế hoạch (10 Hz) với giá trị chuẩn tại thời điểm đó."""
+            for rec in self.pending:
+                if len(rec["true_ego"]) < self.H:
+                    rec["true_ego"].append(ego_pose); rec["true_ag"].append(agents_truth)
+            out = []
+            while self.pending and len(self.pending[0]["true_ego"]) == self.H:
+                out.append(self._finalize(self.pending.popleft()))
+            return out
+
+        def _finalize(self, rec):
+            rows, R = [], -np.inf
+            for k in range(self.H):
+                ego_plan = rect_polygon(*rec["plan"][k], *self.ego_dims)
+                ego_true = rect_polygon(*rec["true_ego"][k], *self.ego_dims)
+                for aid, (pred, dims) in rec["pred"].items():
+                    if aid not in rec["true_ag"][k]: continue        # tác nhân đã rời vùng
+                    d_plan = poly_distance(ego_plan, rect_polygon(*pred[k], *dims))
+                    d_true = poly_distance(ego_true, rect_polygon(*rec["true_ag"][k][aid], *dims))
+                    R = max(R, (d_plan - d_true) / self.sigma[k])
+                    rows.append(dict(**rec["meta"], t=rec["t"], tau=k + 1, agent_id=aid,
+                                     d_plan=d_plan, d_true=d_true,
+                                     violation=int(d_true < self.d_s)))
+            return dict(meta=rec["meta"], t=rec["t"], R=R, rows=rows)
+
+- Với ước lượng σ_(τ) ở giai đoạn đầu, chạy với σ_(τ) = 1. Ghi (d̂ − d) thô theo từng τ để ước lượng σ_(τ) sau (mục 8.1).
+- _finalize phải ghi cả sai số tác nhân và sai số xe để tính B1, B3 và kiểm tra Mệnh đề 3:
+  - err_agent = độ lệch tư thế dự báo – thật của tác nhân;
+  - err_ego_pos, err_ego_yaw = độ lệch kế hoạch – thật của xe.
+
+Kiểm tra C6-a (kiểm tra đơn vị bộ đánh giá):
+
+- Cho kế hoạch trùng tư thế thật và dự báo trùng tác nhân thật: R phải bằng 0.
+- Dịch tác nhân thật lại gần xe 0,5 m: R phải xấp xỉ 0, 5/σ_(τ).
+
+Phần 7. Chương trình chạy một lượt – scripts/sim_runner.py
+
+7.1. Vòng lặp chính (khóa bước)
+
+    def run_episode(cfg, seed, method, scenario, condition, q_table, out_path):
+        rng = np.random.default_rng(seed)
+        sim = SimWorld(port=cfg.port, tm_port=cfg.tm_port, town=cfg.town, dt=0.05, seed=seed)
+        try:
+            ego = spawn_tesla(sim, cfg.route.start_tf)
+            act = TeslaActuator(cfg.vehicle, dt=sim.dt)
+            apply_condition(act, cfg.conditions[condition], rng)        # đặt trễ D4/D5
+            agents = build_scenario(sim, scenario, cfg, rng)
+            noise = LocalizationNoise(cfg.noise, rng)
+            predictor, planner = make_predictor(cfg), make_planner(cfg, method)
+            calib = make_calibrator(method, q_table)       # B0..B6, ĐX-1..3
+            evalr = DelayedEvaluator(cfg.H, cfg.ego_dims, cfg.sigma_tau, cfg.d_s)
+            logger = EpisodeLogger(out_path, meta=dict(seed=seed, method=method,
+                                   scenario=scenario, condition=condition))
+            ctrl = carla.VehicleControl(brake=1.0); x_true = read_state(ego, cfg.vehicle); plan = None
+            for k in range(int(cfg.T_max / sim.dt)):
+                t = k*sim.dt
+                ego.apply_control(ctrl)                                  # 1. gửi lệnh (đã trễ)
+                for a in agents: a.update(x_true[:2], t, sim.dt)         # 2. tác nhân
+                sim.tick()                                               # 3. CARLA tiến 1 bước
+                x_true = read_state(ego, cfg.vehicle)                    #    tư thế thật tại tâm cầu sau
+                rtk = rtk_state(condition, t, cfg, rng)                  # 4. trạng thái RTK
+                e = noise.sample(rtk, x_true[3], x_true[2], sim.dt)
+                x_est = x_true.copy(); x_est[:3] += e                    #    tư thế ước lượng
+                truth = {a.id: a.pose() for a in agents if a.visible(x_true)}
+                if k % 2 == 0:                                           # 5. 10 Hz: lập kế hoạch
+                    tracks = update_tracks(truth, t)                     #    (có thể thêm nhiễu nhận thức)
+                    pred = predictor(tracks)
+                    q = calib.q(group=rtk, t=t)
+                    plan = planner.plan(x_est, pred, margin=cfg.sigma_tau*q)
+                    evalr.add_plan(t, plan.poses_H, pred, meta=dict(group=rtk, q_used=q,
+                                   fallback=plan.fallback))
+                    for res in evalr.add_truth(x_true[:3], truth):
+                        logger.write(res); calib.feedback(res)           # ĐX-3 cập nhật trễ H bước
+                v_cmd, d_cmd = pure_pursuit(x_est, plan.path_xy, plan.path_v, cfg.vehicle["L"],
+                                            dmax=cfg.vehicle["delta_max"])
+                ctrl = act(x_est[3], v_cmd, d_cmd)                       # 6. lệnh cho bước sau
+                logger.step(t, x_true, x_est, v_cmd, d_cmd, truth)
+                if reached_goal(x_true, cfg) or collided(x_true, truth, cfg): break
+        finally:
+            logger.close(); sim.close()
+
+Thứ tự trong một bước là cố định; không được đảo:
+
+1.  gửi lệnh điều khiển (đã qua bộ đệm trễ);
+2.  tác nhân cập nhật;
+3.  CARLA tick;
+4.  đo (thêm nhiễu);
+5.  lập kế hoạch (10 Hz);
+6.  bộ bám và bộ chuyển lệnh tính lệnh cho bước sau.
+
+Hàm read_state(ego, p) đọc get_transform() và get_velocity(), quy đổi về hệ tay phải (mục 1.6) và dời gốc từ tâm actor về tâm cầu sau, trả về [p_(x), p_(y), ψ, v, δ]. Góc lái δ ước lượng từ lệnh steer gần nhất.
+
+7.2. Ghi dữ liệu – av_core/logger.py
+
+- File chu kỳ (mỗi dòng là một cặp (τ, j) của một chu kỳ đã đánh giá): data/raw/<exp>/<run_id>_cycles.parquet.
+- File bước (20 Hz, để vẽ hình và tính độ giật): data/raw/<exp>/<run_id>_steps.parquet.
+- File meta: data/raw/<exp>/<run_id>_meta.json, gồm:
+  - hạt giống, phương pháp, kịch bản, điều kiện;
+  - git commit;
+  - mã băm cấu hình và mã băm mô hình dự báo;
+  - phiên bản CARLA;
+  - thời gian bắt đầu và kết thúc;
+  - trạng thái kết thúc: goal / collision / timeout / error.
+
+Phần 8. Bước C6–C7 – Thu dữ liệu hiệu chỉnh, hiệu chỉnh và chứng nhận
+
+8.1. Ước lượng σ_(τ) (hạt giống 200–249)
+
+    def estimate_sigma(df, q=0.9, floor=0.05):
+        """df: bảng chu kỳ; lấy max theo tác nhân của (d_plan - d_true) cho từng (chu kỳ, tau)."""
+        g = df.assign(s=df.d_plan - df.d_true).groupby(["run_id", "t", "tau"]).s.max()
+        sig = g.groupby("tau").quantile(q).clip(lower=floor)
+        return sig.sort_index().to_numpy()      # mảng độ dài H, lưu vào configs/sigma_tau.npy
+
+8.2. Lấy thưa và tính ngưỡng – av_core/calibrator.py
+
+    import numpy as np
+
+    def thin(df_R, every_s=2.0):
+        """Giữ 1 chu kỳ mỗi every_s giây trong mỗi lượt, giảm tương quan thời gian."""
+        df_R = df_R.sort_values(["run_id", "t"])
+        keep = (df_R.t // every_s).astype(int)
+        return df_R.groupby(["run_id", keep]).head(1)
+
+    def conformal_q(R, alpha):
+        R = np.sort(np.asarray(R)); n = len(R)
+        k = int(np.ceil((n + 1)*(1 - alpha)))
+        return np.inf if k > n else R[k - 1]
+
+    def q_by_group(df_R, alpha, groups=("fixed", "float", "lost")):
+        out = {}
+        for g in groups:
+            R = df_R.loc[df_R.group == g, "R"].to_numpy()
+            out[g] = conformal_q(R, alpha) if len(R) >= int(np.ceil(1/alpha)) - 1 else None
+        return out   # None -> dùng ngưỡng chung, phải ghi rõ trong bài
+
+8.3. Thuật toán 1 – scripts/calibrate.py
+
+    q ← q0                                         # ví dụ: ngưỡng của B1
+    lặp k = 1..5:
+        chạy batch: method=ĐX-x (ngưỡng q), seeds = tập hiệu chỉnh vòng k
+        R ← thin(R từ dữ liệu vòng k);  q_new ← conformal_q(R, α)  (và theo nhóm)
+        ghi (k, q, q_new, n) vào calib_log.csv
+        nếu |q_new − q| < 0,01: thoát;  q ← q_new
+    q_plan ← q (+ η nhỏ nếu cần)
+    chạy batch chứng nhận: seeds 400–449, ngưỡng q_plan → q̂_cert
+    nếu q̂_cert ≤ q_plan → ghi CHỨNG NHẬN vào configs/q_table.yaml
+    ngược lại → tăng q_plan, chạy lại chứng nhận trên hạt giống mới (450–499), ghi lại mọi lần thử
+
+- Chia hạt giống 250–399 thành các khối cho từng vòng, để mỗi vòng dùng dữ liệu mới.
+- Không dùng hạt giống kiểm tra (500–699) ở bất kỳ vòng nào.
+
+Kiểm tra C7:
+
+- calib_log.csv cho thấy q hội tụ.
+- Ngưỡng của các nhóm có thứ tự hợp lý: fixed ≤ float ≤ lost. Nếu không, xem lại nhãn nhóm.
+
+Phần 9. Bước C8 – Chạy hàng loạt các thí nghiệm
+
+9.1. Cấu hình thí nghiệm – configs/experiments.yaml
+
+    E4:
+      scenarios: [S1, S2, S3, S4]
+      conditions: [D0, D1, D2, D3, D4, D5]
+      methods: [B0, B1, B2, B3, B4, B5, B6, DX1, DX2, DX3]
+      seeds: [500, 699]        # mỗi ô >= 50 lượt; kiểm tra số mẫu sau lấy thưa >= 865
+      alpha: 0.1
+    E5:
+      scenarios: [S2]
+      conditions: [D1]
+      methods: [B1, B3, DX2]
+      alphas: [0.01, 0.02, 0.05, 0.1, 0.2, 0.3]
+      seeds: [500, 599]
+    E7:
+      ablations: [no_sigma, no_group, no_iter, no_yaw, no_delay]
+
+9.2. Chạy song song nhiều máy chủ CARLA
+
+    # mỗi máy chủ một cổng RPC riêng (cách nhau 2) và một cổng Traffic Manager riêng
+    ./CarlaUE4.sh -RenderOffScreen -quality-level=Low -carla-rpc-port=2000 &
+    ./CarlaUE4.sh -RenderOffScreen -quality-level=Low -carla-rpc-port=2002 &
+    python scripts/batch.py --exp E4 --port 2000 --tm-port 8000 --shard 0/2 &
+    python scripts/batch.py --exp E4 --port 2002 --tm-port 8002 --shard 1/2 &
+
+batch.py phải:
+
+- tạo danh sách tổ hợp (kịch bản × điều kiện × phương pháp × hạt giống) rồi chia theo --shard;
+- bỏ qua lượt đã có file meta trạng thái hoàn thành, để chạy tiếp được sau khi ngắt;
+- bắt lỗi từng lượt: ghi status: error cùng thông báo lỗi, rồi khởi động lại kết nối và chạy lượt tiếp theo.
+
+Ước lượng thời gian chạy. E4 có 4 × 6 × 10 × 50 = 12 000 lượt. Nếu mỗi lượt khoảng 40 s mô phỏng và chạy nhanh gấp 4 lần thời gian thực (không hiển thị), thì cần khoảng 33 giờ trên một máy chủ. Hai máy chủ song song cần khoảng 17 giờ. Đo thời gian thật trên 100 lượt đầu rồi lập lịch.
+
+9.3. Thứ tự chạy khuyến nghị
+
+1.  Chạy khói (smoke test): 1 hạt giống × mọi tổ hợp. Kiểm tra không có lỗi và dữ liệu đủ cột.
+2.  Chạy thử: 10 hạt giống × S2 × D0, D2 × B1, ĐX-2. Xem xu hướng.
+3.  Báo cáo NCS và GVHD trước khi chạy đầy đủ.
+4.  Chạy đầy đủ E4 → E5 → E6 → E7.
+5.  E8 đo thời gian tính trên máy tính dự kiến gắn trên xe thật (giai đoạn sau).
+
+9.4. E8 – Đo thời gian tính
+
+- Chạy chuỗi nút ROS 2 trên máy tính nhúng, dữ liệu phát lại từ rosbag ghi ở CARLA.
+- Đo thời gian từng khối bằng time.perf_counter_ns(): dự báo, hiệu chỉnh, lập kế hoạch, bộ bám.
+- Báo cáo trung vị và P95. Tiêu chí: tổng P95 < 100 ms.
+
+9.5. Kiểm tra tương đương hai cách chạy
+
+- Chọn 20 lượt. Chạy bằng chế độ khóa bước và bằng chuỗi nút ROS 2 (cùng hạt giống).
+- So sánh R và quỹ đạo.
+- Chênh lệch chấp nhận được nếu chỉ do thời điểm nhận thông điệp. Báo cáo độ lớn chênh lệch.
+
+Phần 10. Bước C9 – Xử lý số liệu, thống kê và hình
+
+10.1. Độ phủ và khoảng tin cậy
+
+    from statsmodels.stats.proportion import proportion_confint
+    def coverage(df_R, q_col="q_used"):
+        ok = (df_R.R <= df_R[q_col]).to_numpy()
+        lo, hi = proportion_confint(ok.sum(), len(ok), alpha=0.05, method="beta")  # Clopper–Pearson
+        return ok.mean(), lo, hi, len(ok)
+
+10.2. So sánh ghép cặp
+
+    from scipy.stats import wilcoxon
+    from statsmodels.stats.contingency_tables import mcnemar
+    # chỉ tiêu liên tục (ví dụ thời gian hoàn thành) ghép theo (scenario, condition, seed)
+    stat, p = wilcoxon(df_a.t_finish.values, df_b.t_finish.values)
+    # chỉ tiêu nhị phân (vi phạm theo lượt): bảng 2x2 ghép cặp
+    res = mcnemar([[n11, n10], [n01, n00]], exact=True)
+
+Hiệu chỉnh Holm khi so một phương pháp đề xuất với nhiều phương pháp đối chứng.
+
+10.3. Sinh hình
+
+make figures gọi scripts/make_figures.py để sinh Hình 3–7 và Bảng II–IV từ data/raw.
+
+- Hình xuất PDF vector, rộng 3,5 in (một cột) hoặc 7,16 in (hai cột).
+- Chữ 8–10 pt.
+- Màu phân biệt được khi in đen trắng: thêm kiểu nét và marker.
+- Chú thích ghi số lượt, số mẫu, khoảng tin cậy.
+
+10.4. Kiểm tra cuối
+
+- Số trong bảng khớp với lần chạy lại script.
+- Mọi lượt error có trong phụ lục, kèm lý do.
+- Độ phủ E1 đạt tiêu chí. ĐX-1 không rộng hơn B3 (Mệnh đề 3).
+
+Phần 11. Lỗi thường gặp và cách xử lý
+
+  ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Hiện tượng                                        Nguyên nhân thường gặp                                                       Cách xử lý
+  ------------------------------------------------- ---------------------------------------------------------------------------- -----------------------------------------------------------------------
+  RuntimeError: time-out khi kết nối                Máy chủ chưa khởi động xong; sai cổng                                        Chờ 20–30 s sau khi chạy CarlaUE4.sh; kiểm tra -carla-rpc-port
+
+  Cảnh báo phiên bản máy khách ≠ máy chủ            Cài sai gói carla                                                            Cài lại file .whl trong PythonAPI/carla/dist đúng phiên bản
+
+  Máy chủ “đứng”, không chạy                        Chương trình trước dừng khi đang ở chế độ đồng bộ                            Khởi động lại máy chủ; luôn dùng try/finally gọi close()
+
+  Xe quay ngược chiều, đi lệch                      Quên đổi dấu y và yaw                                                        Chỉ quy đổi qua to_carla/from_carla (mục 1.6)
+
+  Kết quả khác nhau khi cùng hạt giống              Dùng autopilot, Traffic Manager không đặt hạt giống, hoặc chạy bất đồng bộ   Tác nhân theo kịch bản; set_random_device_seed; chế độ đồng bộ
+
+  Bộ nhớ GPU tăng dần, máy chủ sập sau nhiều lượt   Actor không bị hủy                                                           Hủy mọi actor sau mỗi lượt; khởi động lại máy chủ mỗi khoảng 500 lượt
+
+  try_spawn_actor trả về None                       Vị trí sinh bị chiếm hoặc va chạm                                            Nâng z thêm 0,5 m; dịch vị trí; kiểm tra None trước khi dùng
+
+  R luôn bằng 0 hoặc âm vô cùng                     Lỗi chỉ số τ, tác nhân không được ghép đúng id                               Chạy lại kiểm tra C6-a
+
+  Độ phủ E1 thấp hơn 1 − α                          Dùng n(1 − α) thay vì ⌈(n + 1)(1 − α)⌉; rò rỉ dữ liệu giữa các tập           Kiểm tra conformal_q, kiểm tra chia hạt giống
+  ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Phần 12. Tiến độ và mốc kiểm tra
+
+  ---------------------------------------------------------------------------------------------------------------------------
+  Tuần                 Việc                                                       Mốc kiểm tra (GVHD/NCS duyệt)
+  -------------------- ---------------------------------------------------------- -------------------------------------------
+  1–2                  C1: cài đặt, chế độ đồng bộ, quy đổi tọa độ                Kiểm tra C1-a, b, c
+
+  3–4                  C2: Tesla Model 3, bộ chuyển lệnh, nhận dạng               Kiểm tra C2, tesla_model3.yaml hoàn chỉnh
+
+  5–6                  C3: bộ phát nhiễu, D0–D5                                   Kiểm tra C3, đồ thị sai số D2
+
+  5–8                  C4: kịch bản S1–S4                                         Video từng kịch bản, kiểm tra tất định
+
+  8–12                 C5: dữ liệu, dự báo                                        ADE/FDE, hình dự báo
+
+  9–12                 Mục 6–7: planner, tracker, evaluator, sim_runner           Kiểm tra C6-a; chạy khói
+
+  12–14                C6–C7: σ_(τ), Thuật toán 1, chứng nhận                     calib_log.csv, q_table.yaml
+
+  14–18                C8: E4–E7 đầy đủ; E8 trên máy nhúng                        Dữ liệu đủ, có báo cáo lượt lỗi
+
+  18–20                C9: hình, bảng, thống kê                                   Hình 3–7, Bảng II–IV
+
+  Song song            Ghi Bảng I (tham số Tesla Model 3 và mức nhiễu thiết kế)   Bảng I hoàn chỉnh
+  ---------------------------------------------------------------------------------------------------------------------------
+
+Tài liệu tham khảo
+
+[1] CARLA Team, “CARLA 0.9.16 Release,” carla.org, 16/9/2025. [Online]. Available: https://carla.org/2025/09/16/release-0.9.16
+
+[2] CARLA Team, “CARLA 0.10.0 Release with Unreal Engine 5.5,” carla.org, 19/12/2024. [Online]. Available: https://carla.org/2024/12/19/release-0.10.0
+
+[3] D. Pascual, “ROS bridge installation,” RoboticsLab URJC blog. [Online]. Available: https://roboticslaburjc.github.io/2024-phd-david-pascual/blog/ros-bridge-installation
+
+[4] CARLA Team, “Releases – carla-simulator/carla,” GitHub. [Online]. Available: https://github.com/carla-simulator/carla/releases
+
+[5] AgileX Robotics, “HUNTER SE High-Speed Ackermann UGV.” [Online]. Available: https://global.agilex.ai/products/hunter-se
+
+[6] CARLA Team, “Sensors reference,” CARLA documentation. [Online]. Available: https://carla.readthedocs.io/en/latest/ref_sensors/
+
+[7] T. Moore, D. Stouch, “A generalized extended Kalman filter implementation for the Robot Operating System,” in Proc. IAS-13, Springer, 2016, pp. 335–348.
+
+[8] T. Salzmann, B. Ivanovic, P. Chakravarty, M. Pavone, “Trajectron++: Dynamically-feasible trajectory forecasting with heterogeneous data,” in Proc. ECCV, 2020, pp. 683–700.
+
+[9] A. Sakai et al., “PythonRobotics: a Python code collection of robotics algorithms,” GitHub, AtsushiSakai/PythonRobotics (mục FrenetOptimalTrajectory).

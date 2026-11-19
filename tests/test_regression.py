@@ -39,16 +39,16 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def _load_new_calib() -> tuple[np.ndarray, float]:
-    with open(ROOT / "logs" / "new" / "calibration.json", encoding="utf-8") as f:
+    with open(ROOT / "logs" / "B" / "calibration.json", encoding="utf-8") as f:
         cal = json.load(f)
     return np.array(cal["sigma_tau"], dtype=float), float(cal["DX-1"]["q_final"])
 
 
 def test_tc01_regression_in_v01() -> None:
-    """TC-01: Chạy lại B0 và ĐX-1 trên 5 hạt giống tập IN, khớp logs/new/ (< 1e-9 cho tập lượt, < 1e-6 cho CSV chu kỳ)."""
+    """TC-01: Chạy lại B0 và ĐX-1 trên 5 hạt giống tập IN, khớp logs/B/ (< 1e-9 cho tập lượt, < 1e-6 cho CSV chu kỳ)."""
     sigma_tau, q_dx1 = _load_new_calib()
-    ep_df = pd.read_csv(ROOT / "logs" / "new" / "episodes.csv")
-    cyc_df = pd.read_csv(ROOT / "logs" / "new" / "cycles.csv")
+    ep_df = pd.read_csv(ROOT / "logs" / "B" / "episodes.csv")
+    cyc_df = pd.read_csv(ROOT / "logs" / "B" / "cycles.csv")
 
     for seed in range(500, 505):
         for scn in ("S1", "S2", "S3", "S4"):
