@@ -21,6 +21,7 @@ from carla_sim.infra import CarlaSession, check_carla_env, measure_actuator_late
 from carla_sim.params import build_carla_param_spec, export_param_spec
 from carla_sim.report_carla import generate_carla_report
 from carla_sim.runner import benchmark_s_x_d, run_carla_suite, run_smoke_s1_d0
+from sim.core import CONDITIONS, SCENARIOS
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -71,6 +72,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--dense-v", action="store_true")
     p_run.add_argument("--alpha", type=float, default=0.10)
     p_run.add_argument("--seed-base", type=int, default=0)
+    p_run.add_argument("--scenarios", nargs="+", default=None, metavar="S",
+                       help="Chỉ chạy các kịch bản này, vd. --scenarios S1 (mặc định S1–S4).")
+    p_run.add_argument("--conditions", nargs="+", default=None, metavar="D",
+                       help="Chỉ chạy các điều kiện này, vd. --conditions D0 D1 (mặc định D0–D5).")
     p_run.add_argument("--out", default=None)
 
     p_rep = sub.add_parser("report", help="Sinh hình H12–H13 và báo cáo CARLA so với 2D (T21).")
@@ -131,7 +136,19 @@ def main() -> None:
         ).level_defaults()
         if args.predictor is not None:
             cfg.predictor = args.predictor
+        sel: dict = {}
+        if args.scenarios:
+            bad = [s for s in args.scenarios if s not in SCENARIOS]
+            if bad:
+                raise SystemExit(f"Kịch bản không hợp lệ: {bad} (chọn trong {list(SCENARIOS)})")
+            sel["scenarios"] = tuple(args.scenarios)
+        if args.conditions:
+            bad = [c for c in args.conditions if c not in CONDITIONS]
+            if bad:
+                raise SystemExit(f"Điều kiện không hợp lệ: {bad} (chọn trong {list(CONDITIONS)})")
+            sel["conditions"] = tuple(args.conditions)
         res = run_carla_suite(
+            **sel,
             out_dir=ws_dir / out_rel,
             cfg=cfg,
             backend=args.backend,
