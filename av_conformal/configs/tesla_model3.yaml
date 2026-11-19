@@ -1,0 +1,15 @@
+# Tham số xe Tesla Model 3 trong CARLA 0.9.15 (T29). null = chưa đo; sẽ điền sau khi chạy c2_identify trên máy CARLA.
+# Các giá trị khác null là TẠM (lấy từ hướng dẫn / số liệu danh định), thay khi có log nhận dạng.
+blueprint: vehicle.tesla.model3
+L: 2.875            # TẠM: bản thảo/hướng dẫn; trích lại bằng ego.vehicle_params
+delta_max: 0.5      # TẠM rad; nhận dạng ở C2
+length: 4.69        # TẠM m; từ bounding box
+width: 2.09         # TẠM m
+rear_overhang: 1.0  # TẠM m (tâm cầu sau -> đuôi xe)
+a_max: 3.0          # TẠM m/s^2
+a_min: -8.0         # TẠM m/s^2 (số âm)
+v_max: 8.3          # m/s (30 km/h)
+kp_v: 0.5
+ki_v: 0.1
+steer_gain: 1.2     # TẠM 1/rad (steer = steer_gain * delta)
+cmd_delay: 0.0      # s, trễ nền

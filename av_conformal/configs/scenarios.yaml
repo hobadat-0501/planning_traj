@@ -1,0 +1,18 @@
+# S3, S4: tự thiết kế theo mô tả bản thảo, TẠM (PLAN §11.5 C8), gửi NCS duyệt.
+town: Town03
+route_length: 120.0          # m, chiều dài tuyến xe tự hành
+conflict_point_s: 40.0       # m, vị trí điểm xung đột P dọc tuyến
+S1:
+  pedestrians: {n: [1, 3], speed: [0.8, 1.8], trigger_dist: [8, 20], lateral_start: 5.0, p_stop_mid: 0.2}
+S2:
+  motorbikes: {n: [1, 2], speed: [3.0, 8.0], cross_angle_deg: [30, 90], trigger_dist: [10, 25], approach_len: 25.0,
+               blueprints: [vehicle.yamaha.yzf, vehicle.kawasaki.ninja, vehicle.vespa.zx125]}
+S3:
+  motorbike: {speed: [3.0, 8.0], cross_angle_deg: [60, 90], trigger_dist: [12, 25], approach_len: 25.0}
+  car: {speed: [3.0, 6.0], trigger_dist: [15, 30], approach_len: 30.0}
+S4:
+  lead: {gap: [15.0, 30.0], speed: [4.0, 7.0], brake_decel: [2.0, 5.0], brake_time: [3.0, 8.0]}
+dims:                        # chiều dài x rộng (m)
+  pedestrian: [0.5, 0.5]
+  motorbike: [2.2, 0.8]
+  car: [4.5, 1.9]

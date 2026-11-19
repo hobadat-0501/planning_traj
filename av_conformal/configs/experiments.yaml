@@ -1,0 +1,8 @@
+smoke: {scenarios: [S1, S2, S3, S4], conditions: [D0, D1, D2, D3, D4, D5], methods: [B0], seeds: [0, 0]}
+B0_shared: {scenarios: [S1, S2, S3, S4], conditions: [D0, D1, D2, D3, D4, D5], methods: [B0], seeds: [0, 249]}
+E4:
+  scenarios: [S1, S2, S3, S4]
+  conditions: [D0, D1, D2, D3, D4, D5]
+  methods: [B0, B1, B2, B3, B4, B5, B6, DX1, DX2, DX3]
+  seeds: [500, 549]          # PLAN §11.5 C2: 50 hạt giống ghép cặp
+  alpha: 0.1

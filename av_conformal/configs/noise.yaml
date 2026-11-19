@@ -1,0 +1,4 @@
+# Mức thiết kế, TẠM — NCS chốt và ghi căn cứ (PLAN §11.5 C5)
+fixed: {sigma_white: 0.02, sigma_bias: 0.02, tau_bias: 10.0, sigma_yaw: 0.005}
+float: {sigma_white: 0.10, sigma_bias: 0.25, tau_bias: 20.0, sigma_yaw: 0.02}
+lost:  {gyro_bias: 0.002, sigma_gyro: 0.003, odo_scale: 0.03}
