@@ -1,0 +1,6 @@
+# Chạy trên CARLA 0.9.15 (carla_sim/, run_carla.py) — cần Python 3.7–3.10 (khuyến nghị 3.10)
+-r requirements.txt
+carla==0.9.15
+
+# Tùy chọn cho M2/M3 (bộ dự báo trajectron/learned): cài torch theo CUDA của máy, ví dụ
+#   pip install torch --index-url https://download.pytorch.org/whl/cu121

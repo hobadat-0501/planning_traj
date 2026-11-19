@@ -1,0 +1,7 @@
+# Mô phỏng 2D (sim/), phân tích, báo cáo và kiểm thử — Python >= 3.10
+numpy>=1.24
+scipy>=1.10
+pandas>=2.0
+matplotlib>=3.7
+python-docx>=1.1
+pytest>=7.4
