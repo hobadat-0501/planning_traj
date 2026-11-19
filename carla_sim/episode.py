@@ -326,6 +326,8 @@ def run_carla_episode(
 
                 current_plan = plan
                 last_plan_t = t
+                if not is_fake and cfg.debug_draw:
+                    session.draw_plan(frame, plan, pred_agents)
                 pending_plans.append({
                     "idx_10hz": cur_10hz_idx,
                     "t": t,

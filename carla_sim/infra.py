@@ -98,6 +98,9 @@ class CarlaSession:
         self.ego: Any = None              # Xe tự hành hiện tại (đặt bởi spawn_ego), dùng cho hiển thị
         self._last_wall = time.perf_counter()
         self._n_ticks = 0
+        self._trail_prev: Any = None
+        self._trail_ego_id: int | None = None
+        self.trail_life_s = 17.0          # > T_MAX để vết đường còn tới hết lượt
 
     def __enter__(self) -> "CarlaSession":
         carla = _carla()
@@ -180,6 +183,12 @@ class CarlaSession:
 
         if cfg.debug_draw:
             dbg, life = self.world.debug, cfg.dt_sim * 1.5
+            # Vết đường xe tự hành đã đi (giữ hết lượt)
+            cur = tf.location + carla.Location(z=0.25)
+            if self._trail_prev is not None and self._trail_ego_id == ego.id:
+                dbg.draw_line(self._trail_prev, cur, thickness=0.08, color=carla.Color(0, 120, 255),
+                              life_time=self.trail_life_s)
+            self._trail_prev, self._trail_ego_id = cur, ego.id
             for a in self._actors:
                 tid = getattr(a, "type_id", "")
                 if not (tid.startswith("vehicle.") or tid.startswith("walker.")) or not a.is_alive:
@@ -198,6 +207,38 @@ class CarlaSession:
                 f"steer={c.steer:+.2f} gear={c.gear}",
                 flush=True,
             )
+
+    def draw_plan(self, frame: FrameTransform, plan: Any, pred_agents: list[dict[str, Any]] | None = None) -> None:
+        """Vẽ quỹ đạo kế hoạch 3 s (vàng; đỏ nếu dừng dự phòng) kèm mũi tên hướng ở cuối,
+        và quỹ đạo dự báo của tác nhân (cam). Tồn tại tới chu kỳ lập kế hoạch kế tiếp."""
+        if not self.cfg.debug_draw or self.ego is None:
+            return
+        carla = _carla()
+        dbg = self.world.debug
+        life = self.cfg.dt_plan * 1.2
+        z = self.ego.get_location().z + 0.35
+
+        def _loc(px: float, py: float) -> Any:
+            X, Y = frame.local_to_world_xy(float(px), float(py))
+            return carla.Location(x=X, y=Y, z=z)
+
+        poses = plan.poses
+        color = carla.Color(255, 40, 40) if plan.fallback else carla.Color(255, 210, 0)
+        pts = [_loc(p[0], p[1]) for p in poses]
+        for a, b in zip(pts[:-1], pts[1:]):
+            dbg.draw_line(a, b, thickness=0.12, color=color, life_time=life)
+        if len(pts) >= 2:
+            dbg.draw_arrow(pts[-2], pts[-1], thickness=0.15, arrow_size=0.6, color=color, life_time=life)
+
+        for ag in pred_agents or []:
+            pc = ag.get("pred_centers")
+            if pc is None or len(pc) < 2:
+                continue
+            apts = [_loc(c[0], c[1]) for c in pc]
+            for a, b in zip(apts[:-1], apts[1:]):
+                dbg.draw_line(a, b, thickness=0.08, color=carla.Color(255, 130, 0), life_time=life)
+            dbg.draw_arrow(apts[-2], apts[-1], thickness=0.1, arrow_size=0.4,
+                           color=carla.Color(255, 130, 0), life_time=life)
 
     def track_actor(self, actor: Any) -> Any:
         if actor is not None:

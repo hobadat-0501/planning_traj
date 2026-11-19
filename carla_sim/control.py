@@ -49,7 +49,13 @@ class LongitudinalPID:
     a_brake_full: float = abs(A_MIN)
     v_max: float = V_MAX
     coast_band: float = 0.05
-    integ_lim: float = 2.0
+    integ_lim: float = 4.0
+    # Bù vùng chết ga của xe CARLA: ở tốc độ thấp, ga < ~0,3 không đủ thắng lực cản lăn/hộp số
+    # nên xe đứng yên mãi khi kế hoạch chỉ xin tăng tốc nhẹ từ 0. Mức bù giảm tuyến tính từ
+    # thr_launch (v = 0) về thr_cruise (v >= v_launch_end).
+    thr_launch: float = 0.30
+    thr_cruise: float = 0.05
+    v_launch_end: float = 3.0
     integ: float = 0.0
     last_a_des: float = 0.0
 
@@ -64,10 +70,13 @@ class LongitudinalPID:
         a_des = float(np.clip(self.kp * err + self.ki * self.integ, self.a_min, self.a_max))
         self.last_a_des = a_des
         if v_t < 0.05 and v_current < 0.3:
-            # Giữ xe đứng yên với lực phanh tối đa cho phép của điều kiện
+            # Giữ xe đứng yên với lực phanh tối đa cho phép của điều kiện; xả tích phân
+            self.integ = 0.0
             return 0.0, float(np.clip(abs(self.a_min) / self.a_brake_full, 0.0, 1.0))
         if a_des > self.coast_band:
-            return float(np.clip(a_des / self.a_throttle_full, 0.0, 1.0)), 0.0
+            w = float(np.clip(float(v_current) / self.v_launch_end, 0.0, 1.0))
+            thr_ff = (1.0 - w) * self.thr_launch + w * self.thr_cruise
+            return float(np.clip(thr_ff + a_des / self.a_throttle_full, 0.0, 1.0)), 0.0
         if a_des < -self.coast_band:
             return 0.0, float(np.clip(-a_des / self.a_brake_full, 0.0, 1.0))
         return 0.0, 0.0
@@ -96,6 +105,8 @@ class VehicleControlBridge:
         self._noise = 0.0
         # Ước lượng góc lái hiệu dụng (bậc nhất + giới hạn tốc độ đánh lái) để đưa vào x_est
         self.delta_eff = 0.0
+        self.steer_hold_v = 0.3   # m/s
+        self._last_steer = 0.0
 
     def compute_control_dict(
         self,
@@ -124,6 +135,11 @@ class VehicleControlBridge:
             )
         delta_applied = self.steer_gain_err * d_del + self._noise
         steer = float(np.clip(-delta_applied / self.cfg.delta_max_rad, -1.0, 1.0))  # tay trái: dương = rẽ phải
+        # Xe gần như đứng yên: Pure Pursuit (tầm nhìn 2 m) cho góc lái nhảy theo sai số vị trí nhỏ,
+        # gây "đánh lái tại chỗ". Giữ nguyên góc lái cũ cho tới khi xe lăn bánh.
+        if v_true < self.steer_hold_v:
+            steer = self._last_steer
+        self._last_steer = steer
 
         throttle, brake = self.pid.step(v_del, v_true, dt)
         return {
