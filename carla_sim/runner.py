@@ -39,6 +39,7 @@ from sim.core import (
     CONDITIONS,
     DEFAULT_SIGMA_OLD,
     D_S,
+    GOAL_X,
     GROUPS,
     H_STEPS,
     SCENARIOS,
@@ -271,7 +272,7 @@ def run_demo(
             ep = res["episode"]
             episodes.append(ep)
             print(
-                f"    -> va chạm={ep['collided']} tới đích={ep['completed']} t_end={ep['t_end']:.1f}s "
+                f"    -> {res['end_reason']} sau {ep['t_end']:.1f}s, đi được {res['x_end']:.1f}/{GOAL_X:g} m | "
                 f"d_min={ep['d_min']:.2f}m ttc_min={ep['ttc_min']:.1f}s chu kỳ={ep['n_cycles']} "
                 f"dừng dự phòng={ep['n_fallback']} tcomp_p95={ep['tcomp_p95_ms']:.0f}ms",
                 flush=True,

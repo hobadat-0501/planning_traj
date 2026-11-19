@@ -72,12 +72,15 @@ def _attach_collision_sensor(session: CarlaSession, ego: Any) -> tuple[Any, list
     """Gắn cảm biến va chạm lên xe tự hành trong CARLA thật."""
     import carla  # noqa: PLC0415
 
-    flag = [False]
+    flag: list[Any] = [False, ""]   # [đã va chạm, type_id của vật bị va]
     bp = session.world.get_blueprint_library().find("sensor.other.collision")
     sensor = session.world.spawn_actor(bp, carla.Transform(), attach_to=ego)
     session.track_actor(sensor)
 
-    def _on_col(_event: Any) -> None:
+    def _on_col(event: Any) -> None:
+        if not flag[0]:
+            other = getattr(event, "other_actor", None)
+            flag[1] = str(getattr(other, "type_id", "?"))
         flag[0] = True
 
     sensor.listen(_on_col)
@@ -129,7 +132,9 @@ def run_carla_episode(
     ego_plant: EgoPlant | None = None
     ego_actor: Any = None
     frame: FrameTransform | None = None
-    carla_col_flag = [False]
+    carla_col_flag: list[Any] = [False, ""]
+    col_with = ""
+    ego_progress = 0.0
 
     if is_fake:
         ego_plant = EgoPlant(rng_ego, condition, v0=v0)
@@ -138,6 +143,9 @@ def run_carla_episode(
         import carla  # noqa: PLC0415
 
         spawn_tf, frame = find_straight_spawn(session.world, cfg)
+        n_hidden = session.clear_corridor(frame)
+        if n_hidden:
+            print(f"    (đã ẩn {n_hidden} rào/hộ lan/cột/cây trong hành lang thử nghiệm)", flush=True)
         # Gốc actor Model 3 ~ tâm hộp bao; dời tới XC_LOCAL để tâm cầu sau trùng gốc cục bộ (như EgoPlant px=0)
         ego_tf = frame.make_carla_transform(XC_LOCAL, 0.0, 0.0, z=spawn_tf.location.z)
         ego_actor, _ = spawn_ego(session, ego_tf, cfg, condition=condition)
@@ -376,8 +384,9 @@ def run_carla_episode(
             prev_a = a_now
 
             # 5. Kiểm tra va chạm và khoảng cách tức thời
-            if carla_col_flag[0]:
+            if carla_col_flag[0] and not collided:
                 collided = True
+                col_with = f"CARLA:{carla_col_flag[1]}"
             for ag in agents:
                 if t < ag.behavior.get("appear_t", 0.0):
                     continue
@@ -400,6 +409,8 @@ def run_carla_episode(
                         if ttc_val < ttc_min_ep:
                             ttc_min_ep = ttc_val
                 if s_clr <= 0.0:
+                    if not collided:
+                        col_with = f"{ag.kind}:{ag.id}"
                     collided = True
 
             ego_progress = ref_path.project_s(ego_px_n, ego_py_n) if ref_path is not None else ego_px_n
@@ -443,4 +454,8 @@ def run_carla_episode(
         "cycles": finalized_cycles,
         "perception_stats": perc_pred.stats.to_dict(),
         "unavoidable": int(unavoidable),
+        "end_reason": (
+            f"va chạm ({col_with})" if collided else "tới đích" if completed else f"hết giờ {T_MAX:g}s"
+        ),
+        "x_end": float(ego_progress),
     }

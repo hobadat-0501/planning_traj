@@ -91,6 +91,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p_demo.add_argument("--quiet", action="store_true", help="Không in trạng thái xe mỗi giây.")
     p_demo.add_argument("--csv", default=None, help="Ghi tóm tắt các lượt ra một file CSV (mặc định: không ghi).")
     p_demo.add_argument("--level", choices=("M1", "M2", "M3"), default="M1")
+    p_demo.add_argument("--town", default="Town04")
+    p_demo.add_argument("--agent-mode", choices=("replay", "physics"), default="replay")
+    p_demo.add_argument("--keep-fences", action="store_true", help="Không ẩn rào/hộ lan trong hành lang thử nghiệm.")
     p_demo.add_argument("--host", default="127.0.0.1")
     p_demo.add_argument("--port", type=int, default=2000)
 
@@ -181,6 +184,9 @@ def main() -> None:
             host=args.host,
             port=args.port,
             level=args.level,
+            town=args.town,
+            agent_mode=args.agent_mode,
+            clear_corridor=not args.keep_fences,
             no_rendering=False,
             realtime=not args.fast,
             camera=args.camera,

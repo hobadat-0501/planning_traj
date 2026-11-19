@@ -101,6 +101,8 @@ class CarlaSession:
         self._trail_prev: Any = None
         self._trail_ego_id: int | None = None
         self.trail_life_s = 17.0          # > T_MAX để vết đường còn tới hết lượt
+        self._hidden_env_ids: list[int] = []   # Vật thể môi trường đã ẩn (khôi phục khi đóng)
+        self._cleared_key: Any = None
 
     def __enter__(self) -> "CarlaSession":
         carla = _carla()
@@ -135,6 +137,13 @@ class CarlaSession:
         try:
             self.destroy_tracked_actors()
         finally:
+            if self.world is not None and self._hidden_env_ids:
+                try:
+                    self.world.enable_environment_objects(set(self._hidden_env_ids), True)
+                except Exception:  # noqa: BLE001
+                    pass
+                self._hidden_env_ids = []
+                self._cleared_key = None
             if self.world is not None and self._orig_settings is not None:
                 if self.tm is not None:
                     self.tm.set_synchronous_mode(False)
@@ -275,6 +284,68 @@ class CarlaSession:
         if hasattr(self.world, "set_pedestrians_seed"):
             self.world.set_pedestrians_seed(s)
 
+    def clear_corridor(self, frame: FrameTransform) -> int:
+        """Ẩn (tắt hiển thị + va chạm) rào, hộ lan, tường, cột, biển, cây... trong hành lang thử nghiệm.
+
+        Chỉ làm một lần cho mỗi gốc tọa độ; khôi phục khi `close()`. Trả về số vật thể đã ẩn.
+        """
+        cfg = self.cfg
+        key = (round(frame.x0, 2), round(frame.y0, 2), round(frame.psi0, 4))
+        if not cfg.clear_corridor or self._cleared_key == key:
+            return 0
+        carla = _carla()
+        ids: set[int] = set()
+        for name in _BLOCKER_LABELS:
+            label = getattr(carla.CityObjectLabel, name, None)
+            if label is None:
+                continue
+            for obj in self.world.get_environment_objects(label):
+                if _bbox_in_corridor(obj.bounding_box, frame, cfg.corridor_half_width):
+                    ids.add(int(obj.id))
+        if ids:
+            self.world.enable_environment_objects(ids, False)
+            self._hidden_env_ids.extend(sorted(ids))
+        self._cleared_key = key
+        return len(ids)
+
+
+# Nhãn vật thể môi trường cản đường tác nhân (ẩn trong hành lang); không ẩn Roads/Sidewalks/Buildings/Bridge
+_BLOCKER_LABELS: tuple[str, ...] = (
+    "Fences", "GuardRail", "Walls", "Poles", "TrafficSigns", "TrafficLight", "Vegetation", "Static", "Dynamic",
+)
+# Nhãn mặt đất dùng để đặt cao độ tác nhân
+_GROUND_LABELS: frozenset[str] = frozenset({"Roads", "Sidewalks", "Ground", "Terrain", "RoadLines", "Bridge"})
+CORRIDOR_X_RANGE: tuple[float, float] = (-10.0, 105.0)   # theo trục x cục bộ (đích GOAL_X = 75 m)
+
+
+def _bbox_in_corridor(bb: Any, frame: FrameTransform, half_width: float) -> bool:
+    """Hộp bao (hệ thế giới) có chạm hành lang x ∈ CORRIDOR_X_RANGE, |y| <= half_width (hệ cục bộ) không."""
+    yaw = math.radians(float(bb.rotation.yaw))
+    c, s = math.cos(yaw), math.sin(yaw)
+    ex, ey = float(bb.extent.x), float(bb.extent.y)
+    xs, ys = [], []
+    for sx, sy in ((1, 1), (1, -1), (-1, 1), (-1, -1)):
+        X = bb.location.x + sx * ex * c - sy * ey * s
+        Y = bb.location.y + sx * ex * s + sy * ey * c
+        px, py = frame.world_to_local_xy(X, Y)
+        xs.append(px)
+        ys.append(py)
+    return (
+        max(xs) >= CORRIDOR_X_RANGE[0] and min(xs) <= CORRIDOR_X_RANGE[1]
+        and max(ys) >= -half_width and min(ys) <= half_width
+    )
+
+
+def ground_z(world: Any, X: float, Y: float, z_ref: float, span: float = 3.0) -> float | None:
+    """Cao độ mặt đất (đường / vỉa hè / nền) tại (X, Y) thế giới, bỏ qua actor; None nếu không thấy."""
+    carla = _carla()
+    try:
+        hits = world.cast_ray(carla.Location(x=X, y=Y, z=z_ref + span), carla.Location(x=X, y=Y, z=z_ref - span))
+    except Exception:  # noqa: BLE001
+        return None
+    zs = [float(h.location.z) for h in hits if str(h.label).split(".")[-1] in _GROUND_LABELS]
+    return max(zs) if zs else None   # mặt trên cùng (vd. vỉa hè cao hơn lòng đường)
+
 
 # ==============================================================================
 # Chọn đoạn đường thẳng
@@ -297,6 +368,13 @@ def find_straight_spawn(world: Any, cfg: CarlaConfig) -> tuple[Any, FrameTransfo
 
     spawns = carla_map.get_spawn_points()
     candidates = [spawns[cfg.spawn_index]] if cfg.spawn_index is not None else spawns
+    # Nhà cửa không ẩn được -> ưu tiên đoạn thẳng có ít nhà nhất trong hành lang (xét tối đa 80 đoạn)
+    try:
+        buildings = [o.bounding_box for o in world.get_environment_objects(_carla().CityObjectLabel.Buildings)]
+    except Exception:  # noqa: BLE001
+        buildings = []
+    best: tuple[int, Any] | None = None
+    n_ok = 0
     for sp in candidates:
         wp = carla_map.get_waypoint(sp.location, project_to_road=True)
         if wp is None or wp.is_junction:
@@ -314,9 +392,18 @@ def find_straight_spawn(world: Any, cfg: CarlaConfig) -> tuple[Any, FrameTransfo
             if dyaw > cfg.straight_yaw_tol_deg or cur.is_junction:
                 ok = False
                 break
-        if ok:
-            _SPAWN_CACHE[key] = wp.transform
-            return wp.transform, FrameTransform.from_carla_transform(wp.transform)
+        if not ok:
+            continue
+        fr = FrameTransform.from_carla_transform(wp.transform)
+        n_bld = sum(_bbox_in_corridor(bb, fr, cfg.corridor_half_width) for bb in buildings)
+        if best is None or n_bld < best[0]:
+            best = (n_bld, wp.transform)
+        n_ok += 1
+        if n_bld == 0 or n_ok >= 80:
+            break
+    if best is not None:
+        _SPAWN_CACHE[key] = best[1]
+        return best[1], FrameTransform.from_carla_transform(best[1])
     raise RuntimeError(
         f"Không tìm được đoạn thẳng >= {cfg.straight_len_m} m trên {cfg.town}; hãy đặt spawn_index thủ công."
     )

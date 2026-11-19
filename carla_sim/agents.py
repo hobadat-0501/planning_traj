@@ -41,6 +41,8 @@ class CarlaAgentManager:
         )
         self.actors: dict[str, Any] = {}
         self.static_actors: list[Any] = []
+        self._world: Any = None
+        self._z_off: dict[str, float] = {}   # Cao độ gốc actor so với mặt đất (walker ~ nửa chiều cao)
         self._bp_rng = np.random.default_rng(int(rng_scn.integers(0, 2**31 - 1)))
 
     def _pick_blueprint(self, bp_lib: Any, kind: str) -> Any:
@@ -66,6 +68,7 @@ class CarlaAgentManager:
         if session is None or getattr(session, "world", None) is None:
             return
         world = session.world
+        self._world = world
         bp_lib = world.get_blueprint_library()
 
         for ag in self.agents:
@@ -78,11 +81,15 @@ class CarlaAgentManager:
                 actor = world.try_spawn_actor(bp, tf_hi)
             if actor is not None:
                 session.track_actor(actor)
-                if self.cfg.agent_mode == "replay" and hasattr(actor, "set_simulate_physics"):
-                    try:
-                        actor.set_simulate_physics(False)
-                    except Exception:
-                        pass
+                bb = actor.bounding_box
+                self._z_off[ag.id] = float(bb.extent.z - bb.location.z) + 0.02
+                if self.cfg.agent_mode == "replay":
+                    if hasattr(actor, "set_simulate_physics"):
+                        try:
+                            actor.set_simulate_physics(False)
+                        except Exception:
+                            pass
+                    self._place_replay(ag, actor, frame)
                 self.actors[ag.id] = actor
 
         # Sinh vật cản tĩnh (xe đỗ lề phải trong S5)
@@ -97,7 +104,28 @@ class CarlaAgentManager:
                         act.set_simulate_physics(False)
                     except Exception:
                         pass
+                bb = act.bounding_box
+                X, Y = frame.local_to_world_xy(obs.cx, obs.cy)
+                zg = self._ground(X, Y, frame.z0)
+                act.set_transform(frame.make_carla_transform(
+                    obs.cx, obs.cy, 0.0, z=zg + float(bb.extent.z - bb.location.z) + 0.02, bb_offset=bb.location))
                 self.static_actors.append(act)
+
+    def _ground(self, X: float, Y: float, z_ref: float) -> float:
+        from carla_sim.infra import ground_z  # noqa: PLC0415
+
+        zg = ground_z(self._world, X, Y, z_ref) if self._world is not None else None
+        return z_ref if zg is None else zg
+
+    def _place_replay(self, ag: SimAgent, actor: Any, frame: FrameTransform) -> None:
+        """Đặt actor (vật lý tắt) đúng tư thế 2D, bám mặt đất; giấu dưới đất khi còn ngoài hành lang."""
+        bb_off = getattr(getattr(actor, "bounding_box", None), "location", None)
+        if abs(ag.py) > self.cfg.corridor_half_width or ag.px < -10.0 or ag.px > 105.0:
+            z = frame.z0 - 30.0
+        else:
+            X, Y = frame.local_to_world_xy(ag.px, ag.py)
+            z = self._ground(X, Y, frame.z0) + self._z_off.get(ag.id, 0.0)
+        actor.set_transform(frame.make_carla_transform(ag.px, ag.py, ag.psi, z=z, bb_offset=bb_off))
 
     def _apply_physics_control(
         self,
@@ -149,10 +177,7 @@ class CarlaAgentManager:
                 continue
 
             if self.cfg.agent_mode == "replay":
-                z_cur = float(actor.get_transform().location.z)
-                bb_off = getattr(getattr(actor, "bounding_box", None), "location", None)
-                tf = frame.make_carla_transform(ag.px, ag.py, ag.psi, z=z_cur, bb_offset=bb_off)
-                actor.set_transform(tf)
+                self._place_replay(ag, actor, frame)
             else:
                 self._apply_physics_control(ag, actor, frame)
 

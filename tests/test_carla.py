@@ -145,7 +145,8 @@ def test_carla_07_mini_suite_checkpoint_and_report(tmp_path: Path) -> None:
         conditions=("D0", "D1"),
     )
     res_m1 = run_carla_suite(out_m1, cfg=CarlaConfig(level="M1").level_defaults(), **mini_kw)
-    assert (out_m1 / "checkpoint.jsonl").exists()
+    # Chạy xong và ghi log thành công thì checkpoint được xóa để đỡ file rác
+    assert not (out_m1 / "checkpoint.jsonl").exists()
     assert "exchangeability" in res_m1["calibration"]
 
     # Chạy lại lần 2 để kiểm tra đọc từ checkpoint không lỗi

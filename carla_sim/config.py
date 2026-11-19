@@ -56,6 +56,11 @@ class CarlaConfig:
     spawn_index: int | None = None
     straight_len_m: float = 95.0
     straight_yaw_tol_deg: float = 2.0
+    # Hành lang thử nghiệm: kịch bản 2D giả định 2 bên đường trống (vỉa hè, nhánh giao cắt).
+    # Ẩn rào/hộ lan/cột/cây... trong hành lang |y| <= corridor_half_width để tác nhân không đi xuyên;
+    # tác nhân (chế độ replay) ở ngoài hành lang được giấu dưới mặt đất cho tới khi đi vào.
+    corridor_half_width: float = 15.0
+    clear_corridor: bool = True
 
     # Tác nhân: "replay" = điều khiển động học theo mã 2D rồi đặt tư thế vào CARLA (tái lập cao);
     #           "physics" = tác nhân là actor vật lý bám theo hành vi kịch bản (walker control / PID xe).
