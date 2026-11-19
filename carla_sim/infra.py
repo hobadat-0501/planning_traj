@@ -95,6 +95,9 @@ class CarlaSession:
         self.frame: int = 0
         self._orig_settings: Any = None
         self._actors: list[Any] = []
+        self.ego: Any = None              # Xe tự hành hiện tại (đặt bởi spawn_ego), dùng cho hiển thị
+        self._last_wall = time.perf_counter()
+        self._n_ticks = 0
 
     def __enter__(self) -> "CarlaSession":
         carla = _carla()
@@ -136,8 +139,65 @@ class CarlaSession:
                 self._orig_settings = None
 
     def tick(self) -> int:
+        cfg = self.cfg
+        if cfg.realtime:
+            wait = cfg.dt_sim - (time.perf_counter() - self._last_wall)
+            if wait > 0.0:
+                time.sleep(wait)
         self.frame = self.world.tick()
+        self._last_wall = time.perf_counter()
+        self._n_ticks += 1
+        if self.ego is not None and (cfg.camera != "none" or cfg.debug_draw or cfg.status_every_s > 0.0):
+            try:
+                self._display_hooks()
+            except RuntimeError:  # actor vừa bị hủy
+                self.ego = None
         return self.frame
+
+    def _display_hooks(self) -> None:
+        """Camera bám xe, khung đánh dấu tác nhân, dòng trạng thái (chỉ phục vụ hiển thị)."""
+        carla = _carla()
+        cfg, ego = self.cfg, self.ego
+        tf = ego.get_transform()
+        vel = ego.get_velocity()
+
+        if cfg.camera != "none":
+            # Lệnh đặt camera có hiệu lực ở tick sau -> đặt theo vị trí dự đoán để không bị giật
+            loc = tf.location + carla.Location(x=vel.x * cfg.dt_sim, y=vel.y * cfg.dt_sim, z=0.0)
+            yaw = math.radians(tf.rotation.yaw)
+            fx, fy = math.cos(yaw), math.sin(yaw)
+            if cfg.camera == "top":
+                cam = carla.Transform(
+                    carla.Location(x=loc.x + 15.0 * fx, y=loc.y + 15.0 * fy, z=loc.z + 35.0),
+                    carla.Rotation(pitch=-80.0, yaw=tf.rotation.yaw),
+                )
+            else:
+                cam = carla.Transform(
+                    carla.Location(x=loc.x - 9.0 * fx, y=loc.y - 9.0 * fy, z=loc.z + 5.0),
+                    carla.Rotation(pitch=-18.0, yaw=tf.rotation.yaw),
+                )
+            self.world.get_spectator().set_transform(cam)
+
+        if cfg.debug_draw:
+            dbg, life = self.world.debug, cfg.dt_sim * 1.5
+            for a in self._actors:
+                tid = getattr(a, "type_id", "")
+                if not (tid.startswith("vehicle.") or tid.startswith("walker.")) or not a.is_alive:
+                    continue
+                atf = a.get_transform()
+                bb = a.bounding_box
+                box = carla.BoundingBox(atf.transform(bb.location), bb.extent)
+                color = carla.Color(0, 200, 0) if a.id == ego.id else carla.Color(230, 0, 0)
+                dbg.draw_box(box, atf.rotation, thickness=0.12, color=color, life_time=life)
+
+        n_status = int(round(cfg.status_every_s / cfg.dt_sim)) if cfg.status_every_s > 0.0 else 0
+        if n_status > 0 and self._n_ticks % n_status == 0:
+            c = ego.get_control()
+            print(
+                f"  frame={self.frame} v={vel.length():5.2f} m/s thr={c.throttle:.2f} brk={c.brake:.2f} "
+                f"steer={c.steer:+.2f} gear={c.gear}",
+                flush=True,
+            )
 
     def track_actor(self, actor: Any) -> Any:
         if actor is not None:
@@ -164,6 +224,7 @@ class CarlaSession:
         # do_tick=False rồi tự tick một lần (tránh tick kép ở chế độ đồng bộ)
         self.client.apply_batch_sync([carla.command.DestroyActor(a.id) for a in reversed(self._actors)], False)
         self._actors = []
+        self.ego = None
         self.tick()
 
     def set_seed(self, seed: int) -> None:
@@ -238,6 +299,7 @@ def spawn_ego(session: CarlaSession, spawn_tf: Any, cfg: CarlaConfig, condition:
     if ego is None:
         raise RuntimeError("Không sinh được xe tự hành tại điểm đã chọn (bị chiếm chỗ?).")
     session.track_actor(ego)
+    session.ego = ego
     friction = cfg.d9_tire_friction_scale if condition == "D9" else 1.0
     tune_vehicle_physics(ego, cfg, tire_friction_scale=friction)
     session.tick()  # cần 1 tick để physics control có hiệu lực và vị trí bánh được cập nhật

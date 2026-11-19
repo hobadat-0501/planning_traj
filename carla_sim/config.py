@@ -74,6 +74,12 @@ class CarlaConfig:
     # Đo E_track bằng nhánh mở vòng theo mô hình 2D (xấp xỉ trên CARLA)
     compute_open_loop: bool = False
 
+    # Hiển thị (lệnh `demo`): không ảnh hưởng kết quả mô phỏng
+    realtime: bool = False           # Chờ cho mỗi tick kéo dài đúng dt_sim thời gian thực
+    camera: str = "none"             # "none" | "chase" (sau lưng xe) | "top" (nhìn từ trên xuống)
+    debug_draw: bool = False         # Vẽ khung quanh xe tự hành (xanh) và tác nhân (đỏ)
+    status_every_s: float = 0.0      # > 0: in tốc độ/ga/phanh/lái của xe mỗi chừng ấy giây
+
     extra: dict[str, Any] = field(default_factory=dict)
 
     @property

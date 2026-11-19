@@ -1,6 +1,7 @@
 """Giao diện dòng lệnh chạy quy trình chuyển mô phỏng Phương án B sang CARLA (G13–G19).
 
 Ví dụ:
+    python run_carla.py demo --scenario S1          # xem trực quan, không ghi file
     python run_carla.py env
     python run_carla.py latency --host 127.0.0.1 --port 2000
     python run_carla.py smoke --backend carla --out logs/carla_smoke
@@ -20,7 +21,7 @@ from carla_sim.config import CarlaConfig
 from carla_sim.infra import CarlaSession, check_carla_env, measure_actuator_latency
 from carla_sim.params import build_carla_param_spec, export_param_spec
 from carla_sim.report_carla import generate_carla_report
-from carla_sim.runner import benchmark_s_x_d, run_carla_suite, run_smoke_s1_d0
+from carla_sim.runner import benchmark_s_x_d, run_carla_suite, run_demo, run_smoke_s1_d0
 from sim.core import CONDITIONS, SCENARIOS
 
 
@@ -77,6 +78,21 @@ def _build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--conditions", nargs="+", default=None, metavar="D",
                        help="Chỉ chạy các điều kiện này, vd. --conditions D0 D1 (mặc định D0–D5).")
     p_run.add_argument("--out", default=None)
+
+    p_demo = sub.add_parser("demo", help="Xem trực quan vài lượt trên cửa sổ CARLA (thời gian thực, không ghi file).")
+    p_demo.add_argument("--scenario", default="S1", choices=SCENARIOS)
+    p_demo.add_argument("--condition", default="D0", choices=CONDITIONS)
+    p_demo.add_argument("--episodes", type=int, default=3)
+    p_demo.add_argument("--seed", type=int, default=500)
+    p_demo.add_argument("--margin", type=float, default=0.0, help="Biên an toàn hằng (m); 0 = B0.")
+    p_demo.add_argument("--camera", choices=("top", "chase", "none"), default="top")
+    p_demo.add_argument("--fast", action="store_true", help="Không chờ thời gian thực.")
+    p_demo.add_argument("--no-draw", action="store_true", help="Không vẽ khung tác nhân.")
+    p_demo.add_argument("--quiet", action="store_true", help="Không in trạng thái xe mỗi giây.")
+    p_demo.add_argument("--csv", default=None, help="Ghi tóm tắt các lượt ra một file CSV (mặc định: không ghi).")
+    p_demo.add_argument("--level", choices=("M1", "M2", "M3"), default="M1")
+    p_demo.add_argument("--host", default="127.0.0.1")
+    p_demo.add_argument("--port", type=int, default=2000)
 
     p_rep = sub.add_parser("report", help="Sinh hình H12–H13 và báo cáo CARLA so với 2D (T21).")
     p_rep.add_argument("--ws", default=".")
@@ -158,6 +174,28 @@ def main() -> None:
         )
         print(f"Hoàn tất {args.level} -> {ws_dir / out_rel}")
         print(json.dumps(res["summary"]["by_method"], ensure_ascii=False, indent=2))
+        return
+
+    if args.cmd == "demo":
+        cfg = CarlaConfig(
+            host=args.host,
+            port=args.port,
+            level=args.level,
+            no_rendering=False,
+            realtime=not args.fast,
+            camera=args.camera,
+            debug_draw=not args.no_draw,
+            status_every_s=0.0 if args.quiet else 1.0,
+        )
+        run_demo(
+            cfg,
+            scenario=args.scenario,
+            condition=args.condition,
+            n_episodes=args.episodes,
+            seed=args.seed,
+            margin_m=args.margin,
+            out_csv=(ws_dir / args.csv) if args.csv else None,
+        )
         return
 
     if args.cmd == "report":

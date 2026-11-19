@@ -72,6 +72,7 @@ python run_ext.py --seed-base 0
 
 4. Quy trình chuyển sang CARLA (PLAN §9, TASKS T15–T21):
 ```bash
+python run_carla.py demo --scenario S1                    # Xem trực quan trên cửa sổ CARLA (thời gian thực, không ghi file)
 python run_carla.py env                                   # Kiểm tra Python, gói carla và GPU (T15)
 python run_carla.py latency --host 127.0.0.1 --port 2000  # Đo trễ chấp hành thực của CARLA (T15)
 python run_carla.py smoke --backend carla                 # Kiểm tra cầu nối S1+D0 (T16)

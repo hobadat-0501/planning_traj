@@ -234,6 +234,59 @@ def run_smoke_s1_d0(
     return {"episode": res["episode"], "summary": summary}
 
 
+def run_demo(
+    cfg: CarlaConfig | None = None,
+    *,
+    scenario: str = "S1",
+    condition: str = "D0",
+    n_episodes: int = 1,
+    seed: int = 500,
+    margin_m: float = 0.0,
+    backend: str = "carla",
+    out_csv: Path | None = None,
+) -> list[dict[str, Any]]:
+    """Chạy vài lượt để xem trực quan (lệnh `demo`): in kết quả từng lượt, không ghi file
+    trừ khi có `out_csv` (khi đó ghi đúng một file CSV tóm tắt các lượt).
+
+    Bộ lập kế hoạch dùng biên hằng `margin_m` (0 = B0), không cần hiệu chỉnh trước.
+    """
+    cfg = (cfg or CarlaConfig()).level_defaults()
+    sigma_tau = DEFAULT_SIGMA_OLD
+    m_fn = make_const_margin_fn(float(margin_m), sigma_tau, 0.0)
+    episodes: list[dict[str, Any]] = []
+    with _open_session(cfg, backend=backend) as session:
+        for i in range(int(n_episodes)):
+            print(f"[{i + 1}/{n_episodes}] {scenario} {condition} seed={seed + i}", flush=True)
+            res = run_carla_episode(
+                session=session,
+                seed=seed + i,
+                scenario=scenario,
+                condition=condition,
+                method="B0" if margin_m == 0.0 else f"const{margin_m:g}",
+                margin_fn=m_fn,
+                sigma_tau=sigma_tau,
+                cfg=cfg,
+                keep_tau_arrays=False,
+            )
+            ep = res["episode"]
+            episodes.append(ep)
+            print(
+                f"    -> va chạm={ep['collided']} tới đích={ep['completed']} t_end={ep['t_end']:.1f}s "
+                f"d_min={ep['d_min']:.2f}m ttc_min={ep['ttc_min']:.1f}s chu kỳ={ep['n_cycles']} "
+                f"dừng dự phòng={ep['n_fallback']} tcomp_p95={ep['tcomp_p95_ms']:.0f}ms",
+                flush=True,
+            )
+    if out_csv is not None and episodes:
+        import csv  # noqa: PLC0415
+
+        out_csv.parent.mkdir(parents=True, exist_ok=True)
+        with open(out_csv, "w", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=list(episodes[0].keys()))
+            w.writeheader()
+            w.writerows(episodes)
+    return episodes
+
+
 def benchmark_s_x_d(
     cfg: CarlaConfig | None = None,
     backend: str = "carla",
@@ -606,6 +659,9 @@ def run_carla_suite(
         methods_order=methods_order,
         keep_empty=False,
     )
+    # Đã ghi đủ log chuẩn -> bỏ file checkpoint tạm (chỉ dùng để chạy tiếp khi bị ngắt)
+    if ckpt is not None and ckpt.path.exists():
+        ckpt.path.unlink()
     return {
         "config": config_out,
         "calibration": calibration_out,
