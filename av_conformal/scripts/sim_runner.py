@@ -118,10 +118,13 @@ def run_episode(cfg, seed, method, scenario, condition, out_dir, backend="fake",
                 predictor.update(truth, t)
                 preds = predictor(dims)
                 q = calib.q(group=rtk, t=t)
+                s0_, d0_, th0_ = route.to_frenet(x_est[0], x_est[1])
+                dpsi0_ = float((x_est[2] - th0_ + np.pi) % (2 * np.pi) - np.pi)
                 plan = planner.plan(x_est, preds, sigma * q)
                 n_fallback += int(plan.fallback)
                 evalr.add_plan(t, plan.poses_H, preds, meta=dict(
                     group=rtk, q_used=q, fallback=int(plan.fallback), n_agents=len(preds),
+                    n_cand=plan.n_candidates, n_checked=plan.n_checked, s0=s0_, d0=d0_, dpsi0=dpsi0_, v_est=float(x_est[3]),
                     scenario=scenario, condition=condition, method=method, seed=seed))
                 plan_ms.append((time.perf_counter() - t0) * 1e3)
             if plan is None:
