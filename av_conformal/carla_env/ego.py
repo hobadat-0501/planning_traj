@@ -52,4 +52,5 @@ def read_state(ego, rear_dx, delta_last=0.0):
 
 def to_vehicle_control(ctrl):
     import carla
-    return carla.VehicleControl(throttle=float(ctrl.throttle), steer=float(ctrl.steer), brake=float(ctrl.brake))
+    # av_core: delta > 0 là rẽ trái (tay phải); CARLA: steer > 0 là rẽ phải -> đảo dấu.
+    return carla.VehicleControl(throttle=float(ctrl.throttle), steer=-float(ctrl.steer), brake=float(ctrl.brake))
