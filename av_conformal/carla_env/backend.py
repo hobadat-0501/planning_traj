@@ -46,6 +46,16 @@ class CarlaBackend:
             tf = carla.Transform(carla.Location(x=x, y=-y, z=0.5), carla.Rotation(yaw=-math.degrees(psi)))
             self.ego = spawn_tesla(self.sim, tf)
             self.rear_dx = vehicle_params(self.ego)["rear_dx"]
+            # Gốc xe tự hành là tâm cầu sau: dời tâm actor để cầu sau trùng điểm đầu tuyến (rear_dx < 0).
+            cx = x - self.rear_dx * math.cos(psi)
+            cy = y - self.rear_dx * math.sin(psi)
+            z = self.ego.get_transform().location.z
+            self.ego.set_transform(carla.Transform(carla.Location(x=cx, y=-cy, z=z + 0.05),
+                                                   carla.Rotation(yaw=-math.degrees(psi))))
+            self.sim.tick()
+            st = read_state(self.ego, self.rear_dx)
+            if math.hypot(st[0] - x, st[1] - y) > 0.3:
+                raise RuntimeError(f"cầu sau lệch điểm đầu tuyến {math.hypot(st[0] - x, st[1] - y):.2f} m sau khi dời")
         except Exception:
             self.sim.close()
             raise
