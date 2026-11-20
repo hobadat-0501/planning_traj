@@ -59,8 +59,16 @@ class Agent:
         bps = sorted(lib.filter(self.blueprint_filter), key=lambda b: b.id)
         bp = bps[int(rng.integers(len(bps)))]
         x, y, z, yaw = to_carla_xyz_yaw(self.pos[0], self.pos[1], self.heading, z=1.0 if self.kind == "pedestrian" else 0.3)
-        tf = carla.Transform(carla.Location(x=x, y=y, z=z), carla.Rotation(yaw=yaw))
-        self.actor = sim.spawn(bp, tf)
+        # độ cao mặt đường thật tại điểm sinh (bản đồ không nhất thiết ở z = 0)
+        wp = sim.world.get_map().get_waypoint(carla.Location(x=x, y=y, z=0.0), project_to_road=True)
+        self.z_ground = float(wp.transform.location.z) if wp is not None else 0.0
+        base = self.z_ground + (1.0 if self.kind == "pedestrian" else 0.3)
+        self.actor = None
+        for dz in (0.0, 0.3, 0.8, 1.5):      # thử cao dần nếu điểm sinh bị chiếm/chìm
+            tf = carla.Transform(carla.Location(x=x, y=y, z=base + dz), carla.Rotation(yaw=yaw))
+            self.actor = sim.spawn(bp, tf)
+            if self.actor is not None:
+                break
         if self.actor is None:
             raise RuntimeError(f"không sinh được actor cho {self.id}")
         if self.kind != "pedestrian":
@@ -77,6 +85,7 @@ class Agent:
             self.actor.apply_control(carla.WalkerControl(direction=d, speed=float(self.speed)))
         else:
             x, y, z, yaw = to_carla_xyz_yaw(self.pos[0], self.pos[1], self.heading, z=0.3)
+            z += getattr(self, "z_ground", 0.0)
             self.actor.set_transform(carla.Transform(carla.Location(x=x, y=y, z=z), carla.Rotation(yaw=yaw)))
 
 

@@ -50,12 +50,19 @@ class CarlaBackend:
             cx = x - self.rear_dx * math.cos(psi)
             cy = y - self.rear_dx * math.sin(psi)
             z = self.ego.get_transform().location.z
-            self.ego.set_transform(carla.Transform(carla.Location(x=cx, y=-cy, z=z + 0.05),
-                                                   carla.Rotation(yaw=-math.degrees(psi))))
-            self.sim.tick()
-            st = read_state(self.ego, self.rear_dx)
-            if math.hypot(st[0] - x, st[1] - y) > 0.3:
-                raise RuntimeError(f"cầu sau lệch điểm đầu tuyến {math.hypot(st[0] - x, st[1] - y):.2f} m sau khi dời")
+            target = carla.Transform(carla.Location(x=cx, y=-cy, z=z + 0.05),
+                                     carla.Rotation(yaw=-math.degrees(psi)))
+            err = float("inf")
+            for _ in range(5):          # set_transform đôi khi chưa có hiệu lực sau 1 tick -> thử lại
+                self.ego.set_transform(target)
+                self.ego.set_target_velocity(carla.Vector3D(0, 0, 0))
+                self.sim.tick()
+                st = read_state(self.ego, self.rear_dx)
+                err = math.hypot(st[0] - x, st[1] - y)
+                if err <= 0.3:
+                    break
+            if err > 0.3:
+                raise RuntimeError(f"cầu sau lệch điểm đầu tuyến {err:.2f} m sau khi dời (5 lần thử)")
         except Exception:
             self.sim.close()
             raise
