@@ -4,7 +4,7 @@ from __future__ import annotations
 import numpy as np
 
 
-def pure_pursuit(x, path_xy, path_v, L, ld_min=1.0, k_ld=0.5, dmax=0.4):
+def pure_pursuit(x, path_xy, path_v, L, ld_min=1.0, k_ld=0.5, dmax=0.4, v_look_idx=5):
     """x = [px,py,psi,v,delta]; path_xy (N,2). Trả về (v_cmd, delta_cmd)."""
     path_xy = np.asarray(path_xy)
     ld = max(ld_min, k_ld * x[3])
@@ -15,4 +15,7 @@ def pure_pursuit(x, path_xy, path_v, L, ld_min=1.0, k_ld=0.5, dmax=0.4):
     alpha = np.arctan2(dy, dx) - x[2]
     alpha = (alpha + np.pi) % (2 * np.pi) - np.pi
     delta = np.arctan2(2 * L * np.sin(alpha), ld)
-    return float(path_v[idx]), float(np.clip(delta, -dmax, dmax))
+    # Vận tốc lệnh: lấy tại điểm gần nhất cộng tối đa v_look_idx mẫu (0,5 s), không lấy điểm xa tới cuối quỹ đạo.
+    # Khi quỹ đạo ngắn hơn ld (xe sắp dừng), idx rơi vào cuối quỹ đạo và v_cmd sẽ là vận tốc 3-5 s sau.
+    iv = min(idx, i0 + v_look_idx, len(path_v) - 1)
+    return float(path_v[iv]), float(np.clip(delta, -dmax, dmax))
