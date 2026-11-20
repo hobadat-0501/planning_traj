@@ -5,11 +5,16 @@ import numpy as np
 
 
 def predict_cv(track, H, dt):
-    """track: [[t,x,y],...] (>=2 điểm gần nhất). Trả về (H,3) tư thế dự báo (x,y,psi), τ = 1..H."""
+    """track: [[t,x,y(,psi)],...] (>=2 điểm gần nhất). Trả về (H,3) tư thế dự báo (x,y,psi), τ = 1..H.
+    Khi tác nhân chậm/đứng yên, hướng giữ theo psi đã đo (nếu có) thay vì 0 (xe dẫn đứng yên không bị xoay)."""
     track = np.asarray(track, dtype=float)
-    (t0, x0, y0), (t1, x1, y1) = track[-2], track[-1]
+    t0, x0, y0 = track[-2][:3]
+    t1, x1, y1 = track[-1][:3]
     v = np.array([x1 - x0, y1 - y0]) / max(t1 - t0, 1e-9)
-    psi = float(np.arctan2(v[1], v[0])) if np.linalg.norm(v) > 0.05 else 0.0
+    if np.linalg.norm(v) > 0.05:
+        psi = float(np.arctan2(v[1], v[0]))
+    else:
+        psi = float(track[-1][3]) if track.shape[1] > 3 else 0.0
     xy = np.array([[x1, y1] + v * dt * k for k in range(1, H + 1)])
     return np.c_[xy, np.full(H, psi)]
 
@@ -24,7 +29,7 @@ class ConstantVelocityPredictor:
     def update(self, truth: dict, t):
         for aid, pose in truth.items():
             tr = self.tracks.setdefault(aid, [])
-            tr.append([t, pose[0], pose[1]])
+            tr.append([t, pose[0], pose[1], pose[2] if len(pose) > 2 else 0.0])
             del tr[:-self.history]
         for aid in list(self.tracks):
             if aid not in truth:

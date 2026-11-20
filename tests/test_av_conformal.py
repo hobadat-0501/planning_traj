@@ -147,6 +147,15 @@ def test_predict_cv_straight_ade_zero():
     assert ade < 1e-9 and fde < 1e-9
 
 
+def test_predict_stationary_keeps_heading():
+    from av_conformal.av_core.predictor import ConstantVelocityPredictor
+    p = ConstantVelocityPredictor(30, 0.1)
+    for k in range(3):
+        p.update({"lead": (10.0, 20.0, 1.57)}, 0.1 * k)
+    pose = p({"lead": (4.5, 1.9)})["lead"][0]
+    assert np.allclose(pose[:, 2], 1.57) and np.allclose(pose[:, :2], [10.0, 20.0])
+
+
 # ---- C4: tái lập ----
 def test_scenario_seed_reproducible():
     route = Route.straight(120.0)
