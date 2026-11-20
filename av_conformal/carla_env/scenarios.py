@@ -64,7 +64,10 @@ class Agent:
         self.z_ground = float(wp.transform.location.z) if wp is not None else 0.0
         base = self.z_ground + (1.0 if self.kind == "pedestrian" else 0.3)
         self.actor = None
-        for dz in (0.0, 0.3, 0.8, 1.5):      # thử cao dần nếu điểm sinh bị chiếm/chìm
+        # Thử cao dần nếu điểm sinh bị chiếm/chìm. Tác nhân kinematic (tắt vật lý, sync đặt lại vị trí mỗi bước)
+        # có thể sinh ở trên cao khi điểm đích chạm vật tĩnh (tường, vỉa hè).
+        dzs = (0.0, 0.3, 0.8, 1.5) if self.kind == "pedestrian" else (0.0, 0.3, 0.8, 1.5, 30.0)
+        for dz in dzs:
             tf = carla.Transform(carla.Location(x=x, y=y, z=base + dz), carla.Rotation(yaw=yaw))
             self.actor = sim.spawn(bp, tf)
             if self.actor is not None:
