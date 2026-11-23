@@ -59,17 +59,16 @@ start_server() {
   STARTED_BY_US=1
 }
 
+can_connect() {
+  python -c "import carla; c = carla.Client('localhost', $PORT); c.set_timeout(5); c.get_server_version()" 2>/dev/null
+}
+
 wait_ready() {   # tối đa ~180 s
   local i
   sleep 10   # ân hạn: tiến trình chính sinh ra chậm sau CarlaUE4.sh
   for i in $(seq 1 34); do
     server_alive || { log "server đã thoát khi khởi động; log:"; tail -5 "$SLOG"; return 1; }
-    if python - <<EOF 2>/dev/null
-import carla
-c = carla.Client("localhost", $PORT); c.set_timeout(5)
-c.get_server_version()
-EOF
-    then log "server sẵn sàng"; return 0; fi
+    if can_connect; then log "server sẵn sàng"; return 0; fi
     sleep 5
   done
   log "server không sẵn sàng sau 180 s"; return 1
@@ -85,6 +84,9 @@ BATCH_ARGS="--exp $EXP --backend carla --host localhost --port $PORT --tm-port $
 
 start_fail=0; err_rounds=0
 for round in $(seq 1 60); do
+  if server_alive && ! can_connect; then
+    log "có tiến trình CARLA cổng $PORT nhưng không kết nối được, dựng lại"; kill_server
+  fi
   if ! server_alive; then
     start_server
     if ! wait_ready; then
