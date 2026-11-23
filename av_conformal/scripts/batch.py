@@ -61,6 +61,7 @@ def main():
     ap.add_argument("--out", default=None)
     ap.add_argument("--backend", default="fake", choices=["fake", "carla"])
     ap.add_argument("--shard", default="0/1")
+    ap.add_argument("--seeds", default=None, help="ghi đè dải hạt giống trong experiments.yaml, dạng LO-HI (gồm cả hai đầu)")
     ap.add_argument("--host", default="localhost")
     ap.add_argument("--port", type=int, default=2000)
     ap.add_argument("--tm-port", type=int, default=8000)
@@ -69,7 +70,8 @@ def main():
     e = cfg["experiments"][a.exp]
     i, n = (int(x) for x in a.shard.split("/"))
     out = a.out or f"av_conformal/data/raw/{a.exp}"
-    r = run_batch(cfg, a.exp, out, e["scenarios"], e["conditions"], e["methods"], range(e["seeds"][0], e["seeds"][1] + 1),
+    lo, hi = (int(x) for x in a.seeds.split("-")) if a.seeds else (e["seeds"][0], e["seeds"][1])
+    r = run_batch(cfg, a.exp, out, e["scenarios"], e["conditions"], e["methods"], range(lo, hi + 1),
                   backend=a.backend, shard_spec=(i, n),
                   backend_args=dict(host=a.host, port=a.port, tm_port=a.tm_port))
     print(json.dumps(r))
