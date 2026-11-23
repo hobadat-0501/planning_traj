@@ -4,13 +4,13 @@
 #   bash av_conformal/scripts/run_headless.sh --exp B0_shared
 #   bash av_conformal/scripts/run_headless.sh --exp B0_shared --seeds 0-4 --out av_conformal/data/raw/B0_pilot
 #
-# Tùy chọn: --mode nullrhi|offscreen (mặc định nullrhi, tự chuyển sang offscreen nếu server không lên được)
+# Tùy chọn: --mode nullrhi|offscreen (mặc định offscreen; nullrhi bị segfault trên CARLA 0.9.15)
 #           --carla-dir DIR  --port 2000  --tm-port 8000  --keep-server (không tắt server khi xong)
 # Chạy ngầm, sống sót khi đóng terminal:
 #   nohup bash av_conformal/scripts/run_headless.sh --exp B0_shared > b0_shared.log 2>&1 &
 set -u
 
-EXP=""; SEEDS=""; OUT=""; MODE="nullrhi"; CARLA_DIR=""; PORT=2000; TM_PORT=8000; KEEP=0
+EXP=""; SEEDS=""; OUT=""; MODE="offscreen"; CARLA_DIR=""; PORT=2000; TM_PORT=8000; KEEP=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --exp) EXP="$2"; shift 2;;
@@ -49,13 +49,14 @@ kill_server() {
 start_server() {
   local flags
   case "$MODE" in
-    nullrhi)   flags="-nullrhi -nosound -quality-level=Low";;
-    offscreen) flags="-RenderOffScreen -nosound -quality-level=Low";;
+    nullrhi)   flags="-nullrhi -quality-level=Low";;
+    offscreen) flags="-RenderOffScreen -quality-level=Low";;
     *) echo "mode lạ: $MODE"; exit 2;;
   esac
   log "khởi động CARLA ($MODE) cổng $PORT, log: $SLOG"
   kill_server
-  ( cd "$CARLA_DIR" && setsid nohup ./CarlaUE4.sh $flags -carla-rpc-port=$PORT > "$OLDPWD/$SLOG" 2>&1 & )
+  # UE4 trên Linux segfault khi không có tty (setsid/nohup + stdin=/dev/null), nên chạy trong pty giả bằng `script`
+  ( cd "$CARLA_DIR" && setsid script -qfec "./CarlaUE4.sh $flags -carla-rpc-port=$PORT" /dev/null > "$OLDPWD/$SLOG" 2>&1 < /dev/null & )
   STARTED_BY_US=1
 }
 
