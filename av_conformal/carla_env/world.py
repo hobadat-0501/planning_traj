@@ -10,7 +10,7 @@ import numpy as np
 
 class SimWorld:
     def __init__(self, host="localhost", port=2000, tm_port=8000, town="Town03", dt=0.05, seed=0,
-                 no_rendering=True, timeout=30.0):
+                 no_rendering=True, timeout=120.0):
         import carla
         self.carla = carla
         self.client = carla.Client(host, port)

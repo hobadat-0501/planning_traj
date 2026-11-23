@@ -142,6 +142,8 @@ def run_episode(cfg, seed, method, scenario, condition, out_dir, backend="fake",
                             d_min=dm if np.isfinite(dm) else -1.0)
             if dm <= 0.0:
                 status = "collision"
+                # vận tốc xe tự hành lúc chạm: ~0 nghĩa là tác nhân đi vào xe đang dừng (phân loại ở bước phân tích)
+                logger.meta["v_at_collision"] = float(x_true[3])
                 break
             if route.to_frenet(x_true[0], x_true[1])[0] >= route.length - 5.0:
                 status = "goal"
