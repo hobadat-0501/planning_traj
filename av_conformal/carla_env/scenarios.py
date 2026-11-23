@@ -67,10 +67,18 @@ class Agent:
         # Thử cao dần nếu điểm sinh bị chiếm/chìm. Tác nhân kinematic (tắt vật lý, sync đặt lại vị trí mỗi bước)
         # có thể sinh ở trên cao khi điểm đích chạm vật tĩnh (tường, vỉa hè).
         dzs = (0.0, 0.3, 0.8, 1.5) if self.kind == "pedestrian" else (0.0, 0.3, 0.8, 1.5, 30.0)
-        for dz in dzs:
-            tf = carla.Transform(carla.Location(x=x, y=y, z=base + dz), carla.Rotation(yaw=yaw))
-            self.actor = sim.spawn(bp, tf)
+        # Người đi bộ: nếu điểm sinh bị vật tĩnh/người khác chiếm thì dịch dần (≤1 m, trục bên CARLA) rồi thử lại.
+        offs = [(0.0, 0.0)] + ([(0.5, 0.0), (-0.5, 0.0), (0.0, 0.5), (0.0, -0.5), (1.0, 0.0), (-1.0, 0.0),
+                                (0.0, 1.0), (0.0, -1.0)] if self.kind == "pedestrian" else [])
+        for ox, oy in offs:
+            for dz in dzs:
+                tf = carla.Transform(carla.Location(x=x + ox, y=y + oy, z=base + dz), carla.Rotation(yaw=yaw))
+                self.actor = sim.spawn(bp, tf)
+                if self.actor is not None:
+                    break
             if self.actor is not None:
+                if ox or oy:   # giữ vị trí danh nghĩa khớp điểm sinh thật (CARLA y trái = -y của av_core)
+                    self.pos = self.pos + np.array([ox, -oy])
                 break
         if self.actor is None:
             raise RuntimeError(f"không sinh được actor cho {self.id}")
