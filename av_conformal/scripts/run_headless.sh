@@ -38,7 +38,7 @@ STARTED_BY_US=0
 
 log() { echo "[$(date +%H:%M:%S)] $*"; }
 
-server_alive() { pgrep -f "CarlaUE4-Linux-Shipping.*-carla-rpc-port=$PORT" > /dev/null; }
+server_alive() { pgrep -f "CarlaUE4.*-carla-rpc-port=$PORT" > /dev/null; }   # khớp cả CarlaUE4.sh lẫn tiến trình chính
 
 kill_server() {
   pkill -f "CarlaUE4.sh.*-carla-rpc-port=$PORT" 2>/dev/null
@@ -61,8 +61,9 @@ start_server() {
 
 wait_ready() {   # tối đa ~180 s
   local i
-  for i in $(seq 1 36); do
-    server_alive || { log "server đã thoát khi khởi động"; return 1; }
+  sleep 10   # ân hạn: tiến trình chính sinh ra chậm sau CarlaUE4.sh
+  for i in $(seq 1 34); do
+    server_alive || { log "server đã thoát khi khởi động; log:"; tail -5 "$SLOG"; return 1; }
     if python - <<EOF 2>/dev/null
 import carla
 c = carla.Client("localhost", $PORT); c.set_timeout(5)
